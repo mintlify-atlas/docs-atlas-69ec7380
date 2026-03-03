@@ -1,0 +1,189 @@
+{
+  "projectType": "data-platform",
+  "projectName": "S2",
+  "projectDescription": "A serverless datastore for real-time, streaming data with durable streams API",
+  "theme": "aspen",
+  "primaryColor": "#4F46E5",
+  "lightColor": "#818CF8",
+  "darkColor": "#4338CA",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/basins",
+              "concepts/streams",
+              "concepts/records",
+              "concepts/durability"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/configuration",
+              "cli/basins",
+              "cli/streams",
+              "cli/records",
+              "cli/interactive-mode",
+              "cli/benchmarking"
+            ]
+          },
+          {
+            "group": "S2 Lite",
+            "pages": [
+              "lite/overview",
+              "lite/quickstart",
+              "lite/deployment",
+              "lite/kubernetes",
+              "lite/monitoring",
+              "lite/configuration"
+            ]
+          },
+          {
+            "group": "SDKs",
+            "pages": [
+              "sdks/overview",
+              "sdks/rust",
+              "sdks/typescript",
+              "sdks/go",
+              "sdks/python",
+              "sdks/java"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/s2s-protocol"
+            ]
+          },
+          {
+            "group": "Basins",
+            "pages": [
+              "api/basins/list",
+              "api/basins/create",
+              "api/basins/delete",
+              "api/basins/get-config",
+              "api/basins/reconfigure"
+            ]
+          },
+          {
+            "group": "Streams",
+            "pages": [
+              "api/streams/list",
+              "api/streams/create",
+              "api/streams/delete",
+              "api/streams/get-config",
+              "api/streams/reconfigure",
+              "api/streams/trim"
+            ]
+          },
+          {
+            "group": "Records",
+            "pages": [
+              "api/records/append",
+              "api/records/read",
+              "api/records/read-session",
+              "api/records/check-tail"
+            ]
+          },
+          {
+            "group": "Access Tokens",
+            "pages": [
+              "api/access-tokens/list",
+              "api/access-tokens/issue",
+              "api/access-tokens/revoke"
+            ]
+          },
+          {
+            "group": "Metrics",
+            "pages": [
+              "api/metrics/account",
+              "api/metrics/basin",
+              "api/metrics/stream"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Usage Patterns",
+            "pages": [
+              "guides/streaming-sessions",
+              "guides/batching",
+              "guides/error-handling",
+              "guides/performance-tuning"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "guides/self-hosting/overview",
+              "guides/self-hosting/s3-setup",
+              "guides/self-hosting/production-deployment",
+              "guides/self-hosting/backup-restore"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "guides/integration/testing",
+              "guides/integration/monitoring",
+              "guides/integration/best-practices"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Durable streaming data API with object storage backend",
+    "Self-hostable S2 Lite server implementation",
+    "CLI tool with interactive TUI mode",
+    "Multi-language SDK support (Rust, TypeScript, Go, Python, Java)",
+    "Real-time streaming sessions with S2S protocol",
+    "Basin and stream management with configurable retention",
+    "Prometheus metrics and monitoring",
+    "SlateDB storage engine with pipelined appends"
+  ],
+  "publicApiSurface": [
+    "S2::new() - Initialize S2 client",
+    "S2::list_basins() - List all basins",
+    "S2Basin::create_stream() - Create a new stream",
+    "S2Stream::append() - Append records to stream",
+    "S2Stream::read() - Read records from stream",
+    "S2Stream::read_session() - Start streaming read session",
+    "S2Stream::check_tail() - Get current tail position",
+    "S2Stream::trim() - Trim stream records",
+    "CLI: s2 create-basin - Create basin",
+    "CLI: s2 append - Append records",
+    "CLI: s2 read - Read records",
+    "CLI: s2 bench - Benchmark performance",
+    "CLI: s2 lite - Run S2 Lite server",
+    "API: POST /basins - Create basin",
+    "API: GET /streams - List streams",
+    "API: POST /streams/{stream}/records - Append records",
+    "API: GET /streams/{stream}/records - Read records"
+  ]
+}
