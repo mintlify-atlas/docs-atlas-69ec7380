@@ -1,0 +1,520 @@
+---
+title: Configuration Reference
+description: Complete configuration guide for S2 Lite
+---
+
+S2 Lite is configured through command-line arguments and environment variables. This guide covers all available configuration options.
+
+## Command-Line Arguments
+
+### Storage Options
+
+<ParamField path="--bucket" type="string">
+  S3 bucket name for object storage backend. If not specified, uses in-memory storage (unless `--local-root` is set).
+
+  ```bash
+  s2 lite --bucket my-s2-bucket
+  ```
+</ParamField>
+
+<ParamField path="--local-root" type="string">
+  Local filesystem directory for storage. Conflicts with `--bucket`.
+
+  ```bash
+  s2 lite --local-root ./s2-data
+  ```
+
+  <Warning>
+  Local filesystem mode does not provide the same durability guarantees as object storage.
+  </Warning>
+</ParamField>
+
+<ParamField path="--path" type="string" default="">
+  Base path prefix within object storage. Allows multiple instances to share a bucket.
+
+  ```bash
+  s2 lite --bucket my-bucket --path s2lite/prod
+  ```
+</ParamField>
+
+### Network Options
+
+<ParamField path="--port" type="integer">
+  Port to listen on. Defaults to 443 if TLS is enabled, otherwise 80.
+
+  ```bash
+  s2 lite --port 8080
+  ```
+</ParamField>
+
+<ParamField path="--no-cors" type="boolean" default="false">
+  Disable permissive CORS headers. By default, S2 Lite allows browser-based clients from any origin.
+
+  ```bash
+  s2 lite --no-cors
+  ```
+</ParamField>
+
+### TLS Options
+
+<ParamField path="--tls-self" type="boolean" default="false">
+  Use a self-signed certificate for TLS. Useful for development and testing.
+
+  ```bash
+  s2 lite --tls-self
+  ```
+
+  <Note>
+  Clients will need to use `--insecure` or configure SSL verification to trust self-signed certificates.
+  </Note>
+</ParamField>
+
+<ParamField path="--tls-cert" type="string">
+  Path to TLS certificate file (e.g., `cert.pem`). Must be used with `--tls-key`.
+
+  ```bash
+  s2 lite --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+  ```
+</ParamField>
+
+<ParamField path="--tls-key" type="string">
+  Path to TLS private key file (e.g., `key.pem`). Must be used with `--tls-cert`.
+</ParamField>
+
+### Initialization Options
+
+<ParamField path="--init-file" type="string">
+  Path to JSON file defining basins and streams to create at startup. Can also be set via `S2LITE_INIT_FILE` environment variable.
+
+  ```bash
+  s2 lite --init-file resources.json
+  ```
+
+  See [Init File Format](#init-file-format) below for details.
+</ParamField>
+
+## Environment Variables
+
+### S2 Lite Configuration
+
+<ParamField path="S2LITE_INIT_FILE" type="string">
+  Path to initialization file. Alternative to `--init-file`.
+
+  ```bash
+  export S2LITE_INIT_FILE=resources.json
+  s2 lite
+  ```
+</ParamField>
+
+<ParamField path="S2LITE_PIPELINE" type="boolean" default="false">
+  Enable append pipelining for improved performance against high-latency object storage.
+
+  ```bash
+  export S2LITE_PIPELINE=true
+  s2 lite
+  ```
+
+  <Warning>
+  Pipelining is currently disabled by default for safety. It will be enabled by default in a future release after further testing.
+  </Warning>
+
+  When enabled, S2 Lite pipelines up to 25 MiB of appends.
+</ParamField>
+
+### AWS Configuration
+
+<ParamField path="AWS_ACCESS_KEY_ID" type="string">
+  AWS access key ID for S3 authentication.
+
+  ```bash
+  export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+  ```
+</ParamField>
+
+<ParamField path="AWS_SECRET_ACCESS_KEY" type="string">
+  AWS secret access key for S3 authentication.
+
+  ```bash
+  export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+  ```
+</ParamField>
+
+<ParamField path="AWS_REGION" type="string">
+  AWS region for S3 bucket.
+
+  ```bash
+  export AWS_REGION=us-east-1
+  ```
+</ParamField>
+
+<ParamField path="AWS_ENDPOINT_URL_S3" type="string">
+  Custom S3 endpoint URL. Required for S3-compatible services like MinIO, Tigris, or Cloudflare R2.
+
+  ```bash
+  # Tigris
+  export AWS_ENDPOINT_URL_S3=https://fly.storage.tigris.dev
+
+  # MinIO
+  export AWS_ENDPOINT_URL_S3=http://minio:9000
+
+  # Cloudflare R2
+  export AWS_ENDPOINT_URL_S3=https://ACCOUNT_ID.r2.cloudflarestorage.com
+  ```
+</ParamField>
+
+<ParamField path="AWS_PROFILE" type="string">
+  AWS profile name from `~/.aws/credentials`.
+
+  ```bash
+  export AWS_PROFILE=production
+  ```
+</ParamField>
+
+### SlateDB Configuration
+
+S2 Lite uses [SlateDB](https://slatedb.io) as its storage engine. Configure SlateDB using `SL8_` prefixed environment variables.
+
+See the [SlateDB Settings reference](https://docs.rs/slatedb/latest/slatedb/config/struct.Settings.html) for all available options.
+
+<ParamField path="SL8_FLUSH_INTERVAL" type="duration">
+  Interval at which to flush writes to object storage.
+
+  **Defaults:**
+  - 50ms for S3 bucket
+  - 5ms for in-memory or local filesystem
+
+  ```bash
+  export SL8_FLUSH_INTERVAL=100ms
+  ```
+
+  <Note>
+  Lower values reduce latency but increase object storage API calls. Higher values improve throughput but increase latency.
+  </Note>
+</ParamField>
+
+<ParamField path="SL8_MANIFEST_POLL_INTERVAL" type="duration">
+  Interval at which to poll for manifest updates. Used for fencing out previous instances.
+
+  ```bash
+  export SL8_MANIFEST_POLL_INTERVAL=1s
+  ```
+</ParamField>
+
+<ParamField path="SL8_L0_COMPACTION_THRESHOLD" type="integer">
+  Number of L0 SSTables before triggering compaction.
+
+  ```bash
+  export SL8_L0_COMPACTION_THRESHOLD=8
+  ```
+</ParamField>
+
+### Logging Configuration
+
+<ParamField path="RUST_LOG" type="string" default="info">
+  Logging level configuration. Supports module-level filtering.
+
+  ```bash
+  # Global info level
+  export RUST_LOG=info
+
+  # Debug level for s2-lite
+  export RUST_LOG=s2_lite=debug
+
+  # Mixed levels
+  export RUST_LOG=s2_lite=debug,slatedb=info,tower_http=debug
+  ```
+
+  **Available levels:** `error`, `warn`, `info`, `debug`, `trace`
+</ParamField>
+
+## Init File Format
+
+The init file is a JSON document that defines basins and streams to create at startup. It uses create-or-reconfigure semantics, making it safe for repeated restarts.
+
+### Schema
+
+```json schema.json
+{
+  "basins": [
+    {
+      "name": "string",
+      "config": {
+        "create_stream_on_append": "boolean (optional)",
+        "create_stream_on_read": "boolean (optional)",
+        "default_stream_config": {
+          "storage_class": "'standard' | 'express' (optional)",
+          "retention_policy": "'infinite' | duration string (optional)",
+          "timestamping": {
+            "mode": "'client-prefer' | 'client-require' | 'arrival' (optional)",
+            "uncapped": "boolean (optional)"
+          },
+          "delete_on_empty": {
+            "min_age": "duration string (optional)"
+          }
+        }
+      },
+      "streams": [
+        {
+          "name": "string",
+          "config": {
+            "storage_class": "'standard' | 'express' (optional)",
+            "retention_policy": "'infinite' | duration string (optional)",
+            "timestamping": { /* same as above */ },
+            "delete_on_empty": { /* same as above */ }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Example
+
+```json resources.json
+{
+  "basins": [
+    {
+      "name": "production",
+      "config": {
+        "create_stream_on_append": true,
+        "create_stream_on_read": false,
+        "default_stream_config": {
+          "storage_class": "standard",
+          "retention_policy": "7days",
+          "timestamping": {
+            "mode": "client-prefer",
+            "uncapped": false
+          },
+          "delete_on_empty": {
+            "min_age": "1day"
+          }
+        }
+      },
+      "streams": [
+        {
+          "name": "events",
+          "config": {
+            "retention_policy": "infinite"
+          }
+        },
+        {
+          "name": "logs",
+          "config": {
+            "retention_policy": "24hours",
+            "storage_class": "express"
+          }
+        },
+        {
+          "name": "metrics",
+          "config": {
+            "retention_policy": "30days",
+            "timestamping": {
+              "mode": "arrival"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ephemeral",
+      "config": {
+        "create_stream_on_append": true,
+        "default_stream_config": {
+          "retention_policy": "1hour",
+          "delete_on_empty": {
+            "min_age": "5m"
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+### Field Reference
+
+#### Basin Config
+
+<ParamField path="create_stream_on_append" type="boolean">
+  Automatically create streams on append if they don't exist, using the default stream configuration.
+</ParamField>
+
+<ParamField path="create_stream_on_read" type="boolean">
+  Automatically create streams on read if they don't exist, using the default stream configuration.
+</ParamField>
+
+<ParamField path="default_stream_config" type="object">
+  Default configuration for auto-created streams in this basin.
+</ParamField>
+
+#### Stream Config
+
+<ParamField path="storage_class" type="string">
+  Storage class for recent writes.
+
+  **Options:**
+  - `standard` - Standard S3 storage
+  - `express` - S3 Express One Zone (ultra-low latency)
+
+  ```json
+  "storage_class": "express"
+  ```
+</ParamField>
+
+<ParamField path="retention_policy" type="string">
+  Retention policy for the stream.
+
+  **Options:**
+  - `infinite` - Retain records indefinitely
+  - Duration string - Auto-trim older records (e.g., `7days`, `24hours`, `1week`)
+
+  ```json
+  "retention_policy": "7days"
+  ```
+
+  **Duration formats:**
+  - `1day`, `7days`, `30days`
+  - `1hour`, `24hours`
+  - `1week`, `2weeks`
+  - `1min`, `30mins`
+</ParamField>
+
+<ParamField path="timestamping" type="object">
+  Timestamping behavior for appends.
+
+  ```json
+  "timestamping": {
+    "mode": "client-prefer",
+    "uncapped": false
+  }
+  ```
+</ParamField>
+
+<ParamField path="timestamping.mode" type="string">
+  Timestamping mode.
+
+  **Options:**
+  - `client-prefer` - Use client timestamp if provided, otherwise arrival time
+  - `client-require` - Require client timestamp (reject if not provided)
+  - `arrival` - Always use server arrival time
+</ParamField>
+
+<ParamField path="timestamping.uncapped" type="boolean">
+  Allow client-specified timestamps to exceed arrival time. If `false`, client timestamps are capped at arrival time.
+</ParamField>
+
+<ParamField path="delete_on_empty" type="object">
+  Delete-on-empty configuration.
+
+  ```json
+  "delete_on_empty": {
+    "min_age": "1day"
+  }
+  ```
+</ParamField>
+
+<ParamField path="delete_on_empty.min_age" type="string">
+  Minimum age before an empty stream can be deleted automatically. Set to `0` (or omit) to disable auto-deletion.
+
+  ```json
+  "min_age": "1day"
+  ```
+</ParamField>
+
+## Performance Tuning
+
+### Flush Interval
+
+The most important performance knob is `SL8_FLUSH_INTERVAL`:
+
+- **Lower values (10-50ms)**: Lower latency, higher API call costs
+- **Higher values (100-500ms)**: Higher throughput, lower costs, higher latency
+
+```bash
+# Low latency
+export SL8_FLUSH_INTERVAL=10ms
+
+# High throughput
+export SL8_FLUSH_INTERVAL=500ms
+```
+
+### Pipelining
+
+Enable pipelining for better performance with high-latency object storage:
+
+```bash
+export S2LITE_PIPELINE=true
+```
+
+This allows up to 25 MiB of appends to be in-flight simultaneously.
+
+### Storage Class
+
+Use S3 Express One Zone for ultra-low latency:
+
+```json
+{
+  "storage_class": "express"
+}
+```
+
+<Note>
+S3 Express requires an Express One Zone bucket (ending in `--x-s3`).
+</Note>
+
+## Example Configurations
+
+### Development (In-Memory)
+
+```bash
+s2 lite --port 8080
+```
+
+### Production (S3 with IAM)
+
+```bash
+export AWS_REGION=us-east-1
+export SL8_FLUSH_INTERVAL=50ms
+export S2LITE_PIPELINE=true
+
+s2 lite \
+  --bucket my-s2-bucket \
+  --path production \
+  --no-cors \
+  --init-file /etc/s2-lite/resources.json
+```
+
+### Tigris with Static Credentials
+
+```bash
+export AWS_ACCESS_KEY_ID=tid_xxx
+export AWS_SECRET_ACCESS_KEY=tsec_xxx
+export AWS_ENDPOINT_URL_S3=https://fly.storage.tigris.dev
+export SL8_FLUSH_INTERVAL=30ms
+
+s2 lite \
+  --bucket my-tigris-bucket \
+  --port 8080
+```
+
+### Local Filesystem
+
+```bash
+export SL8_FLUSH_INTERVAL=5ms
+
+s2 lite \
+  --local-root ./s2-data \
+  --port 8080
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deployment" icon="server" href="/lite/deployment">
+    Deploy S2 Lite to production
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/lite/monitoring">
+    Set up monitoring and alerts
+  </Card>
+</CardGroup>

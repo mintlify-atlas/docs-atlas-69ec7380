@@ -1,0 +1,441 @@
+---
+title: Object Storage Setup
+description: Configure S3, Tigris, R2, and other S3-compatible storage for S2 Lite
+---
+
+## Overview
+
+S2 Lite uses object storage as its primary durability layer through [SlateDB](https://slatedb.io). This guide covers setup for popular S3-compatible storage providers.
+
+## AWS S3
+
+### Prerequisites
+
+- AWS account with S3 access
+- IAM credentials or EC2 instance profile
+- S3 bucket created in your desired region
+
+### IAM Permissions
+
+Create an IAM policy with the following permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name",
+        "arn:aws:s3:::your-bucket-name/*"
+      ]
+    }
+  ]
+}
+```
+
+### Local Development with AWS Profile
+
+<Steps>
+  <Step title="Configure AWS credentials">
+    Ensure your AWS credentials are configured:
+    ```bash
+    aws configure
+    ```
+  </Step>
+  
+  <Step title="Create an S3 bucket">
+    ```bash
+    aws s3 mb s3://my-s2-lite-bucket --region us-east-1
+    ```
+  </Step>
+  
+  <Step title="Run S2 Lite with Docker">
+    ```bash
+    docker run -p 8080:80 \
+      -e AWS_PROFILE=${AWS_PROFILE} \
+      -v ~/.aws:/home/nonroot/.aws:ro \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket my-s2-lite-bucket \
+      --path s2lite
+    ```
+  </Step>
+</Steps>
+
+### Production with IAM Roles
+
+#### EC2 Instance Profile
+
+<Steps>
+  <Step title="Create IAM role">
+    Create an IAM role with the S2 Lite policy and attach it to your EC2 instance.
+  </Step>
+  
+  <Step title="Launch S2 Lite">
+    ```bash
+    s2 lite --bucket my-s2-lite-bucket --path s2lite
+    ```
+    
+    S2 Lite automatically discovers and uses the instance profile credentials.
+  </Step>
+</Steps>
+
+#### Kubernetes with IRSA (EKS)
+
+<Steps>
+  <Step title="Create IAM role for service account">
+    ```bash
+    eksctl create iamserviceaccount \
+      --name s2-lite \
+      --namespace default \
+      --cluster my-cluster \
+      --attach-policy-arn arn:aws:iam::123456789012:policy/S2LitePolicy \
+      --approve
+    ```
+  </Step>
+  
+  <Step title="Install Helm chart with IRSA">
+    ```yaml
+    # values.yaml
+    objectStorage:
+      enabled: true
+      bucket: my-s2-lite-bucket
+      path: s2lite
+    
+    serviceAccount:
+      create: true
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/s2-lite-role
+    ```
+    
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+### Static Credentials (Not Recommended)
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_REGION=us-east-1
+
+s2 lite --bucket my-s2-lite-bucket --path s2lite
+```
+
+<Warning>
+Avoid using static credentials in production. Use IAM roles or instance profiles instead.
+</Warning>
+
+## Tigris
+
+[Tigris](https://www.tigrisdata.com/) provides globally distributed S3-compatible object storage with low latency.
+
+### Setup
+
+<Steps>
+  <Step title="Create Tigris bucket">
+    Sign up at [tigrisdata.com](https://www.tigrisdata.com/) and create a bucket.
+  </Step>
+  
+  <Step title="Get credentials">
+    Generate access credentials from the Tigris console:
+    - AWS Access Key ID
+    - AWS Secret Access Key
+  </Step>
+  
+  <Step title="Run S2 Lite">
+    ```bash
+    docker run -p 8080:80 \
+      -e AWS_ACCESS_KEY_ID=${TIGRIS_ACCESS_KEY_ID} \
+      -e AWS_SECRET_ACCESS_KEY=${TIGRIS_SECRET_ACCESS_KEY} \
+      -e AWS_ENDPOINT_URL_S3=https://fly.storage.tigris.dev \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket my-tigris-bucket \
+      --path s2lite
+    ```
+  </Step>
+</Steps>
+
+### Kubernetes Deployment
+
+<Steps>
+  <Step title="Create secret for credentials">
+    ```bash
+    kubectl create secret generic s2-lite-tigris \
+      --from-literal=AWS_ACCESS_KEY_ID=${TIGRIS_ACCESS_KEY_ID} \
+      --from-literal=AWS_SECRET_ACCESS_KEY=${TIGRIS_SECRET_ACCESS_KEY}
+    ```
+  </Step>
+  
+  <Step title="Deploy with Helm">
+    ```yaml
+    # values.yaml
+    objectStorage:
+      enabled: true
+      bucket: my-tigris-bucket
+      path: s2lite
+      endpoint: https://fly.storage.tigris.dev
+    
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: s2-lite-tigris
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: s2-lite-tigris
+            key: AWS_SECRET_ACCESS_KEY
+    ```
+    
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+## Cloudflare R2
+
+[Cloudflare R2](https://developers.cloudflare.com/r2/) provides S3-compatible storage with zero egress fees.
+
+### Setup
+
+<Steps>
+  <Step title="Create R2 bucket">
+    Create a bucket in the Cloudflare dashboard under R2.
+  </Step>
+  
+  <Step title="Generate API token">
+    Create an R2 API token with read and write permissions:
+    - Access Key ID
+    - Secret Access Key
+    - Account ID (for endpoint)
+  </Step>
+  
+  <Step title="Run S2 Lite">
+    ```bash
+    docker run -p 8080:80 \
+      -e AWS_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID} \
+      -e AWS_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY} \
+      -e AWS_ENDPOINT_URL_S3=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket my-r2-bucket \
+      --path s2lite
+    ```
+  </Step>
+</Steps>
+
+### Public Endpoint (Optional)
+
+Cloudflare R2 supports custom domains for public bucket access:
+
+```bash
+# Use public domain endpoint
+docker run -p 8080:80 \
+  -e AWS_ENDPOINT_URL_S3=https://pub-*.r2.dev \
+  ghcr.io/s2-streamstore/s2 lite \
+  --bucket my-r2-bucket
+```
+
+## MinIO (Self-Hosted)
+
+[MinIO](https://min.io/) is a high-performance, self-hosted S3-compatible object store.
+
+### Local Development
+
+<Steps>
+  <Step title="Start MinIO server">
+    ```bash
+    docker run -p 9000:9000 -p 9001:9001 \
+      -e MINIO_ROOT_USER=minioadmin \
+      -e MINIO_ROOT_PASSWORD=minioadmin \
+      minio/minio server /data --console-address ":9001"
+    ```
+  </Step>
+  
+  <Step title="Create bucket">
+    Access MinIO console at http://localhost:9001 and create a bucket named `s2lite`.
+  </Step>
+  
+  <Step title="Run S2 Lite">
+    ```bash
+    docker run --network host \
+      -e AWS_ACCESS_KEY_ID=minioadmin \
+      -e AWS_SECRET_ACCESS_KEY=minioadmin \
+      -e AWS_ENDPOINT_URL_S3=http://localhost:9000 \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket s2lite \
+      --path data
+    ```
+  </Step>
+</Steps>
+
+### Production Deployment
+
+For production MinIO deployments:
+
+```yaml
+# values.yaml for S2 Lite
+objectStorage:
+  enabled: true
+  bucket: s2lite
+  path: data
+  endpoint: http://minio.minio-system.svc.cluster.local:9000
+
+env:
+  - name: AWS_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: minio-credentials
+        key: accesskey
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-credentials
+        key: secretkey
+```
+
+## Advanced Configuration
+
+### SlateDB Settings
+
+Customize SlateDB behavior using `SL8_` prefixed environment variables:
+
+```bash
+# Adjust flush interval (defaults: 50ms for S3, 5ms for in-memory)
+SL8_FLUSH_INTERVAL=10ms s2 lite --bucket my-bucket
+
+# Configure manifest poll interval
+SL8_MANIFEST_POLL_INTERVAL=5s s2 lite --bucket my-bucket
+```
+
+See [SlateDB Settings Reference](https://docs.rs/slatedb/latest/slatedb/config/struct.Settings.html) for all options.
+
+### Enable Pipelining (Experimental)
+
+Enable append pipelining for improved performance:
+
+```bash
+S2LITE_PIPELINE=true s2 lite --bucket my-bucket
+```
+
+<Warning>
+Pipelining is currently experimental and disabled by default. See [issue #48](https://github.com/s2-streamstore/s2/issues/48) for status.
+</Warning>
+
+## Path Organization
+
+Use the `--path` flag to organize multiple S2 Lite instances in the same bucket:
+
+```bash
+# Production instance
+s2 lite --bucket shared-bucket --path production/s2lite
+
+# Staging instance
+s2 lite --bucket shared-bucket --path staging/s2lite
+
+# Development instance  
+s2 lite --bucket shared-bucket --path dev/s2lite
+```
+
+## Testing Your Setup
+
+<Steps>
+  <Step title="Check server health">
+    ```bash
+    curl http://localhost:8080/health
+    ```
+    
+    Should return `200 OK`.
+  </Step>
+  
+  <Step title="Configure S2 CLI">
+    ```bash
+    export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+    export S2_BASIN_ENDPOINT="http://localhost:8080"
+    export S2_ACCESS_TOKEN="ignored"
+    ```
+  </Step>
+  
+  <Step title="Create a basin">
+    ```bash
+    s2 create-basin test --create-stream-on-append
+    ```
+  </Step>
+  
+  <Step title="Test write and read">
+    ```bash
+    # Write data
+    echo "Hello S2 Lite" | s2 append s2://test/greetings
+    
+    # Read it back
+    s2 read s2://test/greetings --limit 1
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Connection Issues
+
+<AccordionGroup>
+  <Accordion title="Error: Failed to connect to object storage">
+    - Verify bucket name is correct
+    - Check endpoint URL format (must include `https://` or `http://`)
+    - Ensure credentials have proper permissions
+    - Test connectivity: `aws s3 ls s3://your-bucket --endpoint-url $AWS_ENDPOINT_URL_S3`
+  </Accordion>
+  
+  <Accordion title="Error: Access Denied">
+    - Review IAM policy permissions
+    - Verify bucket exists in the specified region
+    - Check that credentials are not expired
+    - For IRSA, ensure service account annotations are correct
+  </Accordion>
+  
+  <Accordion title="Error: Region mismatch">
+    S2 Lite auto-detects region from AWS config. Set explicitly if needed:
+    ```bash
+    export AWS_REGION=us-west-2
+    s2 lite --bucket my-bucket
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Performance Issues
+
+<AccordionGroup>
+  <Accordion title="High latency on appends">
+    - Reduce `SL8_FLUSH_INTERVAL` for faster acknowledgment (at cost of more object store writes)
+    - Enable pipelining with `S2LITE_PIPELINE=true` (experimental)
+    - Ensure S2 Lite is deployed in the same region as your object storage
+  </Accordion>
+  
+  <Accordion title="Slow startup">
+    S2 Lite sleeps for one `manifest_poll_interval` on startup to ensure proper fencing. This is expected behavior. Reduce interval if needed:
+    ```bash
+    SL8_MANIFEST_POLL_INTERVAL=1s s2 lite --bucket my-bucket
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="rocket" href="/guides/self-hosting/production-deployment">
+    Deploy S2 Lite on Kubernetes with Helm
+  </Card>
+  
+  <Card title="Backup & Restore" icon="shield" href="/guides/self-hosting/backup-restore">
+    Configure backup strategies for your data
+  </Card>
+</CardGroup>

@@ -1,0 +1,440 @@
+---
+title: Monitoring & Observability
+description: Monitor S2 Lite with Prometheus metrics, logs, and health checks
+---
+
+S2 Lite provides built-in observability features including Prometheus metrics, structured logging, and health endpoints.
+
+## Health Checks
+
+S2 Lite exposes a `/health` endpoint for readiness and liveness checks.
+
+### Health Endpoint
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Responses:**
+- `200 OK` with body `"OK"` - Server is healthy and database is accessible
+- `503 Service Unavailable` - Database status check failed
+
+### Configuration
+
+<CodeGroup>
+```yaml Docker Compose
+healthcheck:
+  test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+```
+
+```yaml Kubernetes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+```
+</CodeGroup>
+
+<Note>
+The startup probe allows up to 10 minutes for initialization, which is important when using object storage with high latency or large datasets.
+</Note>
+
+## Prometheus Metrics
+
+S2 Lite exposes Prometheus metrics at `/metrics` in text format.
+
+### Metrics Endpoint
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+### Available Metrics
+
+#### Append Metrics
+
+**`s2_append_permit_latency_seconds`**
+- **Type**: Histogram
+- **Description**: Time waiting for append permit (backpressure indicator)
+- **Buckets**: 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.000, 2.500 seconds
+
+**`s2_append_ack_latency_seconds`**
+- **Type**: Histogram  
+- **Description**: Time from append request to acknowledgment
+- **Buckets**: 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.000, 2.500 seconds
+
+**`s2_append_batch_records`**
+- **Type**: Histogram
+- **Description**: Number of records per append batch
+- **Buckets**: 1, 10, 50, 100, 250, 500, 1000 records
+
+**`s2_append_batch_bytes`**
+- **Type**: Histogram
+- **Description**: Size in bytes of append batches
+- **Buckets**: 512, 1024, 4096, 16384, 65536, 262144, 524288, 1048576 bytes
+
+#### Process Metrics
+
+Standard Prometheus process metrics are automatically included:
+- `process_cpu_seconds_total` - CPU time
+- `process_resident_memory_bytes` - Resident memory
+- `process_virtual_memory_bytes` - Virtual memory
+- `process_open_fds` - Open file descriptors
+- `process_max_fds` - Maximum file descriptors
+
+### Scraping Configuration
+
+<CodeGroup>
+```yaml Prometheus (prometheus.yml)
+scrape_configs:
+  - job_name: 's2-lite'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+```
+
+```yaml Kubernetes ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s2-lite
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: s2-lite
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+```
+</CodeGroup>
+
+### Helm Chart Integration
+
+The S2 Lite Helm chart supports automatic ServiceMonitor creation:
+
+```yaml values.yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: prometheus  # Match your Prometheus operator label
+```
+
+For TLS-enabled deployments:
+
+```yaml values.yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    tlsConfig:
+      # For self-signed certificates
+      insecureSkipVerify: true
+      # Or for CA-signed certificates
+      # ca:
+      #   secret:
+      #     name: s2-lite-tls
+      #     key: tls.crt
+```
+
+## Logging
+
+S2 Lite uses structured logging with configurable levels.
+
+### Log Levels
+
+Configure via the `RUST_LOG` environment variable:
+
+<CodeGroup>
+```bash Default (info)
+export RUST_LOG=info
+s2 lite --port 8080
+```
+
+```bash Debug
+export RUST_LOG=debug
+s2 lite --port 8080
+```
+
+```bash Module-specific
+export RUST_LOG=s2_lite=debug,slatedb=info
+s2 lite --port 8080
+```
+</CodeGroup>
+
+### Log Format
+
+Logs are output in a structured format:
+
+```
+2024-03-03T12:00:00.123456Z  INFO s2_lite::server: using s3 object store bucket="my-bucket"
+2024-03-03T12:00:00.234567Z  INFO s2_lite::server: pipelining enabled on append sessions up to 25MiB
+2024-03-03T12:00:00.345678Z  INFO s2_lite::server: starting plain http server addr="0.0.0.0:8080"
+```
+
+### Docker Logging
+
+View logs:
+```bash
+docker logs -f s2-lite
+```
+
+With timestamp:
+```bash
+docker logs -f --timestamps s2-lite
+```
+
+### Kubernetes Logging
+
+View logs:
+```bash
+kubectl logs -l app.kubernetes.io/name=s2-lite --follow
+```
+
+Stream from multiple pods:
+```bash
+kubectl logs -l app.kubernetes.io/name=s2-lite --follow --all-containers
+```
+
+### Systemd Logging
+
+View logs:
+```bash
+sudo journalctl -u s2-lite -f
+```
+
+With filters:
+```bash
+# Last hour
+sudo journalctl -u s2-lite --since "1 hour ago"
+
+# Errors only
+sudo journalctl -u s2-lite -p err
+```
+
+## Grafana Dashboards
+
+### Example Dashboard
+
+Here's a basic Grafana dashboard configuration for S2 Lite:
+
+```json s2-lite-dashboard.json
+{
+  "dashboard": {
+    "title": "S2 Lite Metrics",
+    "panels": [
+      {
+        "title": "Append Latency (p95)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m]))"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "Append Rate",
+        "targets": [
+          {
+            "expr": "rate(s2_append_batch_records_count[5m])"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "Append Throughput (bytes/sec)",
+        "targets": [
+          {
+            "expr": "rate(s2_append_batch_bytes_sum[5m])"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "Memory Usage",
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes"
+          }
+        ],
+        "type": "graph"
+      }
+    ]
+  }
+}
+```
+
+### Key Queries
+
+**Append latency percentiles:**
+```promql
+# p50
+histogram_quantile(0.50, rate(s2_append_ack_latency_seconds_bucket[5m]))
+
+# p95
+histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m]))
+
+# p99
+histogram_quantile(0.99, rate(s2_append_ack_latency_seconds_bucket[5m]))
+```
+
+**Append throughput:**
+```promql
+# Records per second
+rate(s2_append_batch_records_count[5m])
+
+# Bytes per second
+rate(s2_append_batch_bytes_sum[5m])
+
+# Average batch size
+rate(s2_append_batch_records_sum[5m]) / rate(s2_append_batch_records_count[5m])
+```
+
+**Backpressure indicator:**
+```promql
+# High permit latency indicates backpressure
+histogram_quantile(0.95, rate(s2_append_permit_latency_seconds_bucket[5m]))
+```
+
+## Alerting
+
+### Prometheus Alert Rules
+
+```yaml alerts.yml
+groups:
+  - name: s2_lite
+    interval: 30s
+    rules:
+      - alert: S2LiteDown
+        expr: up{job="s2-lite"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "S2 Lite instance is down"
+          description: "S2 Lite instance {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: S2LiteHighAppendLatency
+        expr: histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "S2 Lite high append latency"
+          description: "S2 Lite p95 append latency is {{ $value }}s on {{ $labels.instance }}."
+
+      - alert: S2LiteHighBackpressure
+        expr: histogram_quantile(0.95, rate(s2_append_permit_latency_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "S2 Lite experiencing backpressure"
+          description: "S2 Lite permit latency is {{ $value }}s, indicating backpressure."
+
+      - alert: S2LiteHighMemory
+        expr: process_resident_memory_bytes{job="s2-lite"} > 2e9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "S2 Lite high memory usage"
+          description: "S2 Lite is using {{ $value | humanize }}B of memory."
+```
+
+### Health Check Monitoring
+
+Monitor the health endpoint with your monitoring system:
+
+```yaml docker-compose.yml
+services:
+  s2-lite:
+    # ... other config ...
+    labels:
+      - "com.datadoghq.ad.check_names=[\"http_check\"]"
+      - "com.datadoghq.ad.init_configs=[{}]"
+      - "com.datadoghq.ad.instances=[{\"name\":\"s2-lite\",\"url\":\"http://%%host%%:80/health\",\"timeout\":5}]"
+```
+
+## Performance Monitoring
+
+### Key Performance Indicators
+
+1. **Append Latency**: Time to acknowledge writes
+2. **Permit Latency**: Backpressure / queueing time
+3. **Throughput**: Records and bytes per second
+4. **Memory Usage**: Track for memory leaks
+5. **CPU Usage**: Detect resource constraints
+
+### Benchmarking
+
+Use the built-in benchmark tool:
+
+```bash
+# Create basin
+s2 create-basin benchmark --create-stream-on-append
+
+# Run benchmark
+s2 bench benchmark \
+  --target-mibps 10 \
+  --duration 30s \
+  --catchup-delay 0s
+```
+
+Monitor metrics during the benchmark to establish baselines.
+
+## Tracing
+
+S2 Lite includes HTTP request tracing via `tower-http`:
+
+- Request/response logging at INFO level
+- Detailed request info at DEBUG level
+- Trace IDs in structured logs
+
+<Note>
+Distributed tracing (OpenTelemetry) is not currently supported but is planned for a future release.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/lite/configuration">
+    Configure S2 Lite settings
+  </Card>
+  <Card title="Deployment" icon="server" href="/lite/deployment">
+    Deploy to production
+  </Card>
+</CardGroup>

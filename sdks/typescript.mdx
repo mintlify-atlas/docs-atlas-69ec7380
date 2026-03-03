@@ -1,0 +1,363 @@
+---
+title: TypeScript SDK
+description: Official TypeScript/JavaScript SDK for S2
+---
+
+The TypeScript SDK provides a modern, type-safe interface for integrating S2 into your Node.js and browser applications. It supports async/await patterns and includes full TypeScript definitions.
+
+<Note>
+The TypeScript SDK is compatible with S2 v1 API (v0.22+) and ready for production use.
+</Note>
+
+## Installation
+
+Install via npm:
+
+<CodeGroup>
+```bash npm
+npm install @s2-streamstore/sdk
+```
+
+```bash yarn
+yarn add @s2-streamstore/sdk
+```
+
+```bash pnpm
+pnpm add @s2-streamstore/sdk
+```
+</CodeGroup>
+
+## Quick Start
+
+### Initialize the Client
+
+```typescript
+import { S2 } from '@s2-streamstore/sdk';
+
+const s2 = new S2({
+  accessToken: 'your_access_token'
+});
+```
+
+### Basic Operations
+
+```typescript
+// List basins
+const basins = await s2.listBasins();
+
+// Create a basin
+const basin = await s2.createBasin({
+  name: 'my-basin'
+});
+
+// Get a stream
+const stream = s2.basin('my-basin').stream('my-stream');
+
+// Append records
+const producer = stream.producer();
+await producer.append({ body: 'Hello, S2!' });
+
+// Read records
+const reader = stream.reader();
+for await (const batch of reader.read()) {
+  for (const record of batch.records) {
+    console.log(record.body.toString());
+  }
+}
+```
+
+## Working with Basins
+
+### Create a Basin
+
+```typescript
+const basin = await s2.createBasin({
+  name: 'my-basin',
+  config: {
+    defaultStreamConfig: {
+      retentionPolicy: {
+        type: 'age',
+        seconds: 86400 * 7 // 7 days
+      }
+    }
+  }
+});
+```
+
+### List Basins
+
+```typescript
+// Paginated list
+const page = await s2.listBasins({ limit: 10 });
+
+// List all with automatic pagination
+const allBasins = [];
+for await (const basin of s2.listAllBasins()) {
+  allBasins.push(basin);
+}
+```
+
+### Get Basin Configuration
+
+```typescript
+const config = await s2.getBasinConfig('my-basin');
+```
+
+### Delete a Basin
+
+```typescript
+await s2.deleteBasin('my-basin');
+```
+
+## Working with Streams
+
+### Create a Stream
+
+```typescript
+const basin = s2.basin('my-basin');
+
+const stream = await basin.createStream({
+  name: 'my-stream',
+  config: {
+    timestamping: {
+      mode: 'client_require'
+    }
+  }
+});
+```
+
+### List Streams
+
+```typescript
+const streams = await basin.listStreams();
+
+// With automatic pagination
+for await (const stream of basin.listAllStreams()) {
+  console.log(stream.name);
+}
+```
+
+### Delete a Stream
+
+```typescript
+await basin.deleteStream('my-stream');
+```
+
+## Writing Records
+
+### Using the Producer
+
+```typescript
+const stream = s2.basin('my-basin').stream('my-stream');
+const producer = stream.producer();
+
+// Append a single record
+const ack = await producer.append({
+  body: 'my data'
+});
+console.log('Sequence number:', ack.seqNum);
+
+// Append with metadata
+await producer.append({
+  body: Buffer.from('binary data'),
+  headers: {
+    'content-type': 'application/octet-stream'
+  }
+});
+
+// Batch append
+const acks = await producer.appendBatch([
+  { body: 'record 1' },
+  { body: 'record 2' },
+  { body: 'record 3' }
+]);
+```
+
+### Direct Append
+
+```typescript
+const ack = await stream.append({
+  records: [
+    { body: 'record 1' },
+    { body: 'record 2' }
+  ]
+});
+```
+
+## Reading Records
+
+### Using the Reader
+
+```typescript
+const stream = s2.basin('my-basin').stream('my-stream');
+const reader = stream.reader();
+
+// Read from the beginning
+for await (const batch of reader.read()) {
+  for (const record of batch.records) {
+    console.log('SeqNum:', record.seqNum);
+    console.log('Body:', record.body.toString());
+  }
+}
+
+// Read from a specific position
+for await (const batch of reader.read({ startSeqNum: 100 })) {
+  // Process records
+}
+```
+
+### Single Read
+
+```typescript
+const batch = await stream.read({
+  startSeqNum: 0,
+  limit: 100
+});
+
+for (const record of batch.records) {
+  console.log(record);
+}
+```
+
+### Check Tail
+
+```typescript
+const tail = await stream.checkTail();
+console.log('Latest sequence number:', tail.seqNum);
+```
+
+## Access Tokens
+
+### Issue a Token
+
+```typescript
+const token = await s2.issueAccessToken({
+  description: 'My application token'
+});
+```
+
+### List Tokens
+
+```typescript
+const tokens = await s2.listAccessTokens();
+for (const token of tokens.values) {
+  console.log(token.id, token.description);
+}
+```
+
+### Revoke a Token
+
+```typescript
+await s2.revokeAccessToken('token-id');
+```
+
+## Metrics
+
+```typescript
+// Account metrics
+const accountMetrics = await s2.getAccountMetrics({
+  name: 'record_bytes'
+});
+
+// Basin metrics
+const basinMetrics = await s2.getBasinMetrics({
+  basin: 'my-basin',
+  name: 'append_count'
+});
+
+// Stream metrics
+const streamMetrics = await s2.getStreamMetrics({
+  basin: 'my-basin',
+  stream: 'my-stream',
+  name: 'read_count'
+});
+```
+
+## Error Handling
+
+```typescript
+import { S2Error } from '@s2-streamstore/sdk';
+
+try {
+  await s2.createBasin({ name: 'my-basin' });
+} catch (error) {
+  if (error instanceof S2Error) {
+    console.error('S2 Error:', error.code, error.message);
+  } else {
+    console.error('Unexpected error:', error);
+  }
+}
+```
+
+## Configuration
+
+### Custom Endpoint
+
+```typescript
+const s2 = new S2({
+  accessToken: 'your_token',
+  baseUrl: 'https://custom.s2.dev'
+});
+```
+
+### Request Timeouts
+
+```typescript
+const s2 = new S2({
+  accessToken: 'your_token',
+  timeout: 30000 // 30 seconds
+});
+```
+
+## TypeScript Types
+
+The SDK includes full TypeScript definitions:
+
+```typescript
+import type {
+  Basin,
+  Stream,
+  Record,
+  AppendAck,
+  ReadBatch,
+  BasinConfig,
+  StreamConfig
+} from '@s2-streamstore/sdk';
+```
+
+## Browser Support
+
+The SDK works in modern browsers with ES2020+ support. For older browsers, use a transpiler like Babel.
+
+```typescript
+import { S2 } from '@s2-streamstore/sdk';
+
+const s2 = new S2({
+  accessToken: process.env.S2_ACCESS_TOKEN
+});
+
+// Use in your web application
+```
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="npm Package" icon="npm" href="https://www.npmjs.com/package/@s2-streamstore/sdk">
+    View package on npm
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/s2-streamstore/s2-sdk-typescript">
+    Source code and documentation
+  </Card>
+  <Card title="REST API" icon="api" href="/api/overview">
+    Underlying REST API reference
+  </Card>
+  <Card title="Discord" icon="discord" href="https://discord.gg/vTCs7kMkAf">
+    Join our community
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+- Explore the [REST API](/rest/overview) for detailed API information
+- Learn about [streams](/core/streams) and [records](/core/records)
+- Check out the [GitHub repository](https://github.com/s2-streamstore/s2-sdk-typescript) for examples

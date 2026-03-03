@@ -1,0 +1,164 @@
+---
+title: SDK Overview
+description: Official SDKs for integrating S2 into your applications
+---
+
+S2 provides official SDKs in multiple languages to help you integrate durable streams into your applications. Each SDK offers idiomatic interfaces for interacting with the S2 API.
+
+## Available SDKs
+
+<CardGroup cols={2}>
+  <Card title="Rust SDK" icon="rust" href="/sdks/rust">
+    Full-featured Rust SDK with async support and type safety
+  </Card>
+  <Card title="TypeScript SDK" icon="js" href="/sdks/typescript">
+    TypeScript/JavaScript SDK with modern async patterns
+  </Card>
+  <Card title="Go SDK" icon="golang" href="/sdks/go">
+    Idiomatic Go SDK with goroutines and channels
+  </Card>
+  <Card title="Python SDK" icon="python" href="/sdks/python">
+    Python SDK (migration to v1 API in progress)
+  </Card>
+</CardGroup>
+
+## SDK Compatibility
+
+All SDKs interact with the [S2 REST API](/rest/overview) and support:
+
+- Account and basin management
+- Stream creation and configuration
+- Appending records with batching
+- Reading records with streaming
+- Access token management
+- Metrics retrieval
+
+## Choosing an SDK
+
+### Production Ready
+
+These SDKs are fully compatible with the v1 API and recommended for production use:
+
+- **Rust SDK** - v0.24+ - [Crates.io](https://crates.io/crates/s2-sdk)
+- **TypeScript SDK** - v0.22+ - [npm](https://www.npmjs.com/package/@s2-streamstore/sdk)
+- **Go SDK** - v0.11+ - [GitHub](https://github.com/s2-streamstore/s2-sdk-go)
+
+### Migration Required
+
+These SDKs need to be updated to support the v1 API:
+
+- **Python SDK** - Migration in progress
+- **Java SDK** - Migration in progress
+
+## Common Patterns
+
+All SDKs follow similar patterns for common operations:
+
+### Initialization
+
+Create an SDK client with your access token:
+
+<CodeGroup>
+```rust Rust
+use s2_sdk::{S2, types::S2Config};
+
+let s2 = S2::new(S2Config::new("your_access_token"))?;
+```
+
+```typescript TypeScript
+import { S2 } from '@s2-streamstore/sdk';
+
+const s2 = new S2({ accessToken: 'your_access_token' });
+```
+
+```go Go
+import "github.com/s2-streamstore/s2-sdk-go"
+
+client, err := s2.New(s2.Config{
+    AccessToken: "your_access_token",
+})
+```
+</CodeGroup>
+
+### Writing Records
+
+Append records to streams:
+
+<CodeGroup>
+```rust Rust
+use s2_sdk::types::AppendRecord;
+
+let producer = stream.producer(ProducerConfig::new());
+let ticket = producer.submit(AppendRecord::new("data")?).await?;
+let ack = ticket.await?;
+```
+
+```typescript TypeScript
+const producer = stream.producer();
+const ack = await producer.append({ body: 'data' });
+```
+
+```go Go
+producer := stream.Producer()
+ack, err := producer.Append(ctx, s2.Record{
+    Body: []byte("data"),
+})
+```
+</CodeGroup>
+
+### Reading Records
+
+Read records from streams:
+
+<CodeGroup>
+```rust Rust
+use s2_sdk::types::ReadInput;
+
+let mut batches = stream.read_session(ReadInput::new()).await?;
+while let Some(batch) = batches.next().await {
+    let batch = batch?;
+    // Process batch
+}
+```
+
+```typescript TypeScript
+const reader = stream.reader();
+for await (const batch of reader.read()) {
+    // Process batch
+}
+```
+
+```go Go
+reader := stream.Reader()
+for batch := range reader.Read(ctx) {
+    if batch.Err != nil {
+        // Handle error
+    }
+    // Process batch.Records
+}
+```
+</CodeGroup>
+
+## Getting Help
+
+- **Documentation**: Each SDK has detailed documentation with examples
+- **GitHub Issues**: Report bugs or request features in the respective SDK repository
+- **Discord**: Join our [Discord community](https://discord.gg/vTCs7kMkAf)
+- **Email**: Reach out at [hi@s2.dev](mailto:hi@s2.dev)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Rust SDK Guide" icon="rust" href="/sdks/rust">
+    Get started with the Rust SDK
+  </Card>
+  <Card title="REST API Reference" icon="api" href="/api/overview">
+    Explore the underlying REST API
+  </Card>
+  <Card title="Concepts" icon="book" href="/concepts/overview">
+    Learn about S2 core concepts
+  </Card>
+  <Card title="Examples" icon="code" href="https://github.com/s2-streamstore/s2/tree/main/sdk/examples">
+    Browse code examples
+  </Card>
+</CardGroup>

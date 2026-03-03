@@ -1,0 +1,280 @@
+---
+title: Integration Testing with S2 Lite
+description: Use in-memory S2 Lite as an emulator for integration tests
+---
+
+## Overview
+
+S2 Lite can run entirely in-memory without any external dependencies, making it an excellent emulator for integration testing. This eliminates the need for complex test infrastructure while ensuring your tests run against a real S2 implementation.
+
+<Tip>
+In-memory S2 Lite is a very effective S2 emulator for integration tests.
+</Tip>
+
+## Running S2 Lite In-Memory
+
+### Using Docker
+
+The simplest way to run S2 Lite for testing is with Docker:
+
+```bash
+docker run -p 8080:80 ghcr.io/s2-streamstore/s2 lite
+```
+
+This starts S2 Lite without any bucket configuration, causing it to operate entirely in-memory.
+
+### Using the CLI
+
+If you have the S2 CLI installed:
+
+```bash
+s2 lite --port 8080
+```
+
+<Note>
+Data stored in in-memory mode is lost when the process stops. This is perfect for tests that need a clean state.
+</Note>
+
+## Configuring Your Tests
+
+To connect your tests to the local S2 Lite instance, configure the SDK endpoints:
+
+```bash
+export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+export S2_BASIN_ENDPOINT="http://localhost:8080"
+export S2_ACCESS_TOKEN="ignored"
+```
+
+<Warning>
+In S2 Lite, the `S2_ACCESS_TOKEN` is required but the value is not validated. You can use any string value.
+</Warning>
+
+## Example Test Setup
+
+### Rust
+
+```rust
+use s2_sdk::{
+    S2,
+    types::{AppendInput, AppendRecord, AppendRecordBatch, S2Config, BasinName, StreamName},
+};
+
+#[tokio::test]
+async fn test_append_and_read() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to local S2 Lite
+    let s2 = S2::new(S2Config::new("test-token"))?;
+    let basin_name: BasinName = "test-basin".parse()?;
+    let stream_name: StreamName = "test-stream".parse()?;
+    
+    // Create basin with auto-creation enabled
+    let stream = s2.basin(basin_name).stream(stream_name);
+    
+    // Append a record
+    let input = AppendInput::new(AppendRecordBatch::try_from_iter([
+        AppendRecord::new("test message")?
+    ])?);
+    let output = stream.append(input).await?;
+    
+    assert_eq!(output.records.len(), 1);
+    Ok(())
+}
+```
+
+### TypeScript
+
+```typescript
+import { S2 } from '@s2-streamstore/s2-sdk-ts';
+
+describe('S2 Integration Tests', () => {
+  let client: S2;
+
+  beforeAll(() => {
+    client = new S2({
+      accessToken: 'test-token',
+      accountEndpoint: 'http://localhost:8080',
+      basinEndpoint: 'http://localhost:8080',
+    });
+  });
+
+  it('should append and read records', async () => {
+    const basin = client.basin('test-basin');
+    const stream = basin.stream('test-stream');
+    
+    const result = await stream.append([
+      { body: 'test message' }
+    ]);
+    
+    expect(result.records).toHaveLength(1);
+  });
+});
+```
+
+### Go
+
+```go
+package integration_test
+
+import (
+    "context"
+    "testing"
+    s2 "github.com/s2-streamstore/s2-sdk-go"
+)
+
+func TestAppendAndRead(t *testing.T) {
+    client := s2.NewClient(s2.Config{
+        AccessToken: "test-token",
+    })
+    
+    basin := client.Basin("test-basin")
+    stream := basin.Stream("test-stream")
+    
+    result, err := stream.Append(context.Background(), []s2.AppendRecord{
+        {Body: []byte("test message")},
+    })
+    
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    if len(result.Records) != 1 {
+        t.Errorf("expected 1 record, got %d", len(result.Records))
+    }
+}
+```
+
+## Waiting for S2 Lite to be Ready
+
+Before running tests, ensure S2 Lite is ready:
+
+```bash
+while ! curl -sf http://localhost:8080/health -o /dev/null; do 
+  echo "Waiting for S2 Lite..."
+  sleep 2
+done
+echo "S2 Lite is ready!"
+```
+
+## Creating Test Basins
+
+For tests, create basins with auto-creation of streams enabled:
+
+```bash
+s2 create-basin test-basin --create-stream-on-append --create-stream-on-read
+```
+
+This allows your tests to create streams dynamically without explicit stream creation calls.
+
+## Best Practices
+
+### Use Unique Basin Names
+
+Generate unique basin names per test or test suite to avoid conflicts:
+
+```rust
+let basin_name: BasinName = format!("test-basin-{}", uuid::Uuid::new_v4())
+    .parse()?;
+```
+
+### Clean Up Resources
+
+While in-memory mode loses all data on restart, consider cleaning up basins and streams explicitly:
+
+```rust
+#[tokio::test]
+async fn test_with_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    let s2 = S2::new(S2Config::new("test-token"))?;
+    let basin_name: BasinName = "test-basin".parse()?;
+    
+    // Run your test...
+    
+    // Cleanup
+    s2.delete_basin(basin_name).await?;
+    Ok(())
+}
+```
+
+### Parallel Test Execution
+
+Since each test can use unique basin names, tests can run in parallel without conflicts:
+
+```rust
+#[tokio::test(flavor = "multi_thread")]
+async fn parallel_test_1() { /* ... */ }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn parallel_test_2() { /* ... */ }
+```
+
+## CI/CD Integration
+
+### GitHub Actions
+
+```yaml
+name: Integration Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      s2-lite:
+        image: ghcr.io/s2-streamstore/s2:latest
+        ports:
+          - 8080:80
+        options: >-
+          --health-cmd "curl -f http://localhost:80/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run tests
+        env:
+          S2_ACCOUNT_ENDPOINT: http://localhost:8080
+          S2_BASIN_ENDPOINT: http://localhost:8080
+          S2_ACCESS_TOKEN: test-token
+        run: cargo test
+```
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  s2-lite:
+    image: ghcr.io/s2-streamstore/s2:latest
+    command: lite
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tests:
+    build: .
+    environment:
+      - S2_ACCOUNT_ENDPOINT=http://s2-lite:80
+      - S2_BASIN_ENDPOINT=http://s2-lite:80
+      - S2_ACCESS_TOKEN=test-token
+    depends_on:
+      s2-lite:
+        condition: service_healthy
+    command: cargo test
+```
+
+## Advanced: Local Disk Persistence
+
+For tests that need persistence across restarts, use `--local-root`:
+
+```bash
+s2 lite --port 8080 --local-root /tmp/s2-test-data
+```
+
+<Note>
+Local disk persistence is useful for debugging failed tests or testing recovery scenarios.
+</Note>

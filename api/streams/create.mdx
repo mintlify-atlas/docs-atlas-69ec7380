@@ -1,0 +1,128 @@
+---
+title: 'Create Stream'
+description: 'Create a new stream in a basin'
+api: 'POST /streams'
+---
+
+## Overview
+
+Create a new stream with an optional configuration. The stream name must be unique within the basin.
+
+## Authentication
+
+This endpoint requires authentication via the `S2-Basin` header containing your basin name.
+
+## Headers
+
+<ParamField header="S2-Request-Token" type="string">
+  Optional idempotency token to ensure the request is processed only once. If a stream with the same name already exists and was created with the same token, returns the existing stream instead of an error.
+</ParamField>
+
+## Request Body
+
+<ParamField body="stream" type="string" required>
+  Stream name that is unique to the basin. Can be between 1 and 512 bytes in length.
+  
+  Example: `logs/application`, `metrics/cpu`, `events/user-actions`
+</ParamField>
+
+<ParamField body="config" type="StreamConfig">
+  Optional stream configuration. If not provided, basin defaults will be used.
+  
+  <Expandable title="StreamConfig">
+    <ParamField body="storage_class" type="string">
+      Storage class for recent writes. Options:
+      - `standard` - Append tail latency under 400ms
+      - `express` - Append tail latency under 40ms
+    </ParamField>
+    
+    <ParamField body="retention_policy" type="object">
+      Retention policy for the stream. If unspecified, defaults to 7 days.
+      
+      Options:
+      - `{"age": <seconds>}` - Age in seconds for automatic trimming
+      - `{"infinite": {}}` - Retain records unless explicitly trimmed
+    </ParamField>
+    
+    <ParamField body="timestamping" type="object">
+      Timestamping behavior configuration.
+      
+      <Expandable title="TimestampingConfig">
+        <ParamField body="mode" type="string">
+          Timestamping mode:
+          - `client-prefer` (default) - Prefer client timestamp if present, otherwise use arrival time
+          - `client-require` - Require client timestamp, reject if missing
+          - `arrival` - Use arrival time, ignore client timestamp
+        </ParamField>
+        
+        <ParamField body="uncapped" type="boolean" default="false">
+          Allow client timestamps to exceed arrival time. If false, client timestamps are capped at arrival time.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField body="delete_on_empty" type="object">
+      Automatic deletion configuration for empty streams.
+      
+      <Expandable title="DeleteOnEmptyConfig">
+        <ParamField body="min_age_secs" type="number" default="0">
+          Minimum age in seconds before an empty stream can be deleted. Set to 0 to disable automatic deletion.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+Returns HTTP 201 Created on success.
+
+<ResponseField name="name" type="string">
+  Stream name.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time in RFC 3339 format.
+</ResponseField>
+
+<ResponseField name="deleted_at" type="string | null">
+  Always null for newly created streams.
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X POST 'https://{basin}.b.aws.s2.dev/v1/streams' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "stream": "logs/application",
+    "config": {
+      "storage_class": "standard",
+      "retention_policy": {
+        "age": 604800
+      },
+      "timestamping": {
+        "mode": "client-prefer",
+        "uncapped": false
+      }
+    }
+  }'
+```
+
+## Example Response
+
+```json
+{
+  "name": "logs/application",
+  "created_at": "2024-01-15T10:30:00Z",
+  "deleted_at": null
+}
+```
+
+## Error Responses
+
+- **409 Conflict** - Stream with this name already exists
+- **400 Bad Request** - Invalid stream name or configuration
+- **404 Not Found** - Basin does not exist

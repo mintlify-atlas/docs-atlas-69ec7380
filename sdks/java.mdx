@@ -1,0 +1,327 @@
+---
+title: Java SDK
+description: Official Java SDK for S2
+---
+
+<Warning>
+The Java SDK is currently being migrated to support the S2 v1 API. It is not yet recommended for production use with the current S2 platform.
+</Warning>
+
+The Java SDK will provide a comprehensive Java interface for interacting with S2, with support for modern Java features and reactive patterns.
+
+## Current Status
+
+The Java SDK is undergoing migration to support the S2 v1 API. Once complete, it will provide:
+
+- Full v1 API compatibility
+- Support for Java 11+
+- CompletableFuture-based async APIs
+- Optional reactive streams support
+- Comprehensive type safety
+
+## Repository
+
+The SDK is available at:
+
+<Card title="Java SDK Repository" icon="java" href="https://github.com/s2-streamstore/s2-sdk-java">
+  View source code and track migration progress
+</Card>
+
+## Planned Features
+
+Once migration is complete, the Java SDK will support:
+
+### Installation (Planned)
+
+#### Maven
+
+```xml
+<dependency>
+    <groupId>dev.s2</groupId>
+    <artifactId>s2-sdk</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+#### Gradle
+
+```gradle
+implementation 'dev.s2:s2-sdk:1.0.0'
+```
+
+### Basic Usage (Planned)
+
+```java
+import dev.s2.sdk.S2;
+import dev.s2.sdk.S2Config;
+import dev.s2.sdk.Basin;
+import dev.s2.sdk.Stream;
+
+public class Example {
+    public static void main(String[] args) {
+        // Initialize client
+        S2 s2 = new S2(S2Config.builder()
+            .accessToken("your_access_token")
+            .build());
+        
+        // List basins
+        List<BasinInfo> basins = s2.listBasins().join();
+        
+        // Get a stream
+        Stream stream = s2.basin("my-basin").stream("my-stream");
+        
+        // Append records
+        Producer producer = stream.producer();
+        AppendAck ack = producer.append(
+            AppendRecord.of("Hello, S2!".getBytes())
+        ).join();
+        
+        // Read records
+        Reader reader = stream.reader();
+        reader.read().forEach(batch -> {
+            batch.records().forEach(record -> {
+                System.out.println("Record: " + new String(record.body()));
+            });
+        });
+    }
+}
+```
+
+### Async Operations (Planned)
+
+```java
+import java.util.concurrent.CompletableFuture;
+
+// All operations return CompletableFuture
+CompletableFuture<Basin> basinFuture = s2.createBasin(
+    CreateBasinInput.builder()
+        .name("my-basin")
+        .build()
+);
+
+basinFuture.thenAccept(basin -> {
+    System.out.println("Basin created: " + basin.name());
+}).exceptionally(error -> {
+    System.err.println("Error: " + error.getMessage());
+    return null;
+});
+```
+
+### Working with Basins (Planned)
+
+```java
+import dev.s2.sdk.model.*;
+
+// Create a basin
+Basin basin = s2.createBasin(
+    CreateBasinInput.builder()
+        .name("my-basin")
+        .config(BasinConfig.builder()
+            .defaultStreamConfig(StreamConfig.builder()
+                .retentionPolicy(RetentionPolicy.age(7 * 24 * 60 * 60))
+                .build())
+            .build())
+        .build()
+).join();
+
+// List basins with pagination
+List<BasinInfo> allBasins = new ArrayList<>();
+s2.listAllBasins().forEach(allBasins::add);
+
+// Delete a basin
+s2.deleteBasin(DeleteBasinInput.of("my-basin")).join();
+```
+
+### Writing Records (Planned)
+
+```java
+// Get stream
+Stream stream = s2.basin("my-basin").stream("my-stream");
+Producer producer = stream.producer();
+
+// Append single record
+AppendAck ack = producer.append(
+    AppendRecord.builder()
+        .body("my data".getBytes())
+        .header("content-type", "text/plain")
+        .build()
+).join();
+
+System.out.println("Sequence number: " + ack.seqNum());
+
+// Batch append
+List<AppendRecord> records = List.of(
+    AppendRecord.of("record 1".getBytes()),
+    AppendRecord.of("record 2".getBytes()),
+    AppendRecord.of("record 3".getBytes())
+);
+
+AppendAck batchAck = stream.appendBatch(
+    AppendInput.of(records)
+).join();
+```
+
+### Reading Records (Planned)
+
+```java
+// Read with iteration
+Stream stream = s2.basin("my-basin").stream("my-stream");
+Reader reader = stream.reader();
+
+reader.read().forEach(batch -> {
+    batch.records().forEach(record -> {
+        System.out.println("SeqNum: " + record.seqNum());
+        System.out.println("Body: " + new String(record.body()));
+    });
+});
+
+// Read from specific position
+reader.read(ReadOptions.builder()
+    .startSeqNum(100L)
+    .limit(1000)
+    .build()
+).forEach(batch -> {
+    // Process batch
+});
+
+// Single read
+ReadBatch batch = stream.read(ReadInput.builder()
+    .startSeqNum(0L)
+    .limit(100)
+    .build()
+).join();
+```
+
+### Reactive Streams (Planned)
+
+```java
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+// Using Project Reactor
+Stream stream = s2.basin("my-basin").stream("my-stream");
+ReactiveReader reactiveReader = stream.reactiveReader();
+
+Flux<ReadBatch> batches = reactiveReader.read();
+batches.subscribe(
+    batch -> {
+        // Process batch
+    },
+    error -> {
+        System.err.println("Error: " + error);
+    },
+    () -> {
+        System.out.println("Stream complete");
+    }
+);
+```
+
+### Builder Pattern (Planned)
+
+```java
+// Fluent configuration
+S2 s2 = S2.builder()
+    .accessToken("your_token")
+    .baseUrl("https://custom.s2.dev")
+    .timeout(Duration.ofSeconds(30))
+    .build();
+
+// Input builders
+CreateStreamInput input = CreateStreamInput.builder()
+    .name("my-stream")
+    .config(StreamConfig.builder()
+        .timestamping(TimestampingConfig.builder()
+            .mode(TimestampingMode.CLIENT_REQUIRE)
+            .build())
+        .build())
+    .build();
+```
+
+### Error Handling (Planned)
+
+```java
+import dev.s2.sdk.exception.*;
+
+try {
+    s2.createBasin(CreateBasinInput.of("my-basin")).join();
+} catch (CompletionException e) {
+    Throwable cause = e.getCause();
+    if (cause instanceof UnauthorizedException) {
+        System.err.println("Invalid access token");
+    } else if (cause instanceof NotFoundException) {
+        System.err.println("Resource not found");
+    } else if (cause instanceof ConflictException) {
+        System.err.println("Resource already exists");
+    } else {
+        System.err.println("Error: " + cause.getMessage());
+    }
+}
+```
+
+## Alternative Options
+
+While the Java SDK is being migrated, you can:
+
+1. **Use the REST API directly** with libraries like OkHttp or Java 11+ HttpClient:
+
+```java
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.URI;
+
+HttpClient client = HttpClient.newHttpClient();
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://s2.dev/api/basins"))
+    .header("Authorization", "Bearer " + accessToken)
+    .build();
+
+HttpResponse<String> response = client.send(
+    request,
+    HttpResponse.BodyHandlers.ofString()
+);
+```
+
+2. **Use another SDK** if you can integrate it into your stack:
+   - [TypeScript SDK](/sdks/typescript) for JVM-based JavaScript engines
+   - [Go SDK](/sdks/go)
+   - [Rust SDK](/sdks/rust) with JNI bindings
+
+## Contributing
+
+We welcome contributions to help complete the Java SDK migration! Check the repository for:
+
+- Open issues and migration tasks
+- Contribution guidelines
+- Development setup instructions
+
+<CardGroup cols={2}>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/s2-streamstore/s2-sdk-java">
+    Contribute to the migration
+  </Card>
+  <Card title="REST API Reference" icon="api" href="/api/overview">
+    Use the API directly
+  </Card>
+  <Card title="Discord Community" icon="discord" href="https://discord.gg/vTCs7kMkAf">
+    Discuss SDK development
+  </Card>
+  <Card title="GitHub Issues" icon="bug" href="https://github.com/s2-streamstore/s2-sdk-java/issues">
+    Report issues or request features
+  </Card>
+</CardGroup>
+
+## Stay Updated
+
+To get notified when the Java SDK migration is complete:
+
+- Watch the [GitHub repository](https://github.com/s2-streamstore/s2-sdk-java)
+- Join our [Discord community](https://discord.gg/vTCs7kMkAf)
+- Follow [@s2streamstore](https://twitter.com/s2streamstore) on Twitter
+
+## Next Steps
+
+While waiting for the Java SDK:
+
+- Explore the [REST API](/rest/overview) documentation
+- Learn about [core concepts](/core/overview)
+- Try the [Rust SDK](/sdks/rust) or [TypeScript SDK](/sdks/typescript)

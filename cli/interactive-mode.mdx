@@ -1,0 +1,264 @@
+---
+title: Interactive TUI mode
+description: Use the S2 CLI's terminal user interface for interactive management
+---
+
+The S2 CLI includes an interactive Terminal User Interface (TUI) for browsing and managing basins and streams visually.
+
+## Launch interactive mode
+
+Start the TUI:
+
+```bash
+s2 -i
+# or
+s2 --interactive
+```
+
+The TUI will launch in full-screen mode, replacing your terminal display.
+
+## Features
+
+The interactive mode provides a visual interface for:
+
+- Browsing basins and streams
+- Viewing stream configurations
+- Monitoring stream activity
+- Quick access to common operations
+
+## Setup screen
+
+If you launch the TUI without configuring an access token, you'll see a setup screen prompting you to configure authentication.
+
+To configure before launching:
+
+```bash
+s2 config set access_token YOUR_TOKEN
+```
+
+Then launch interactive mode:
+
+```bash
+s2 -i
+```
+
+## Navigation
+
+The TUI uses standard terminal navigation:
+
+### Keyboard shortcuts
+
+- **Arrow keys** or **h/j/k/l** - Navigate lists and menus
+- **Enter** - Select item or confirm action
+- **Esc** or **q** - Go back or quit
+- **/** - Search or filter
+- **Tab** - Switch between panels
+- **Ctrl+C** - Exit immediately
+
+### Mouse support
+
+If your terminal supports mouse input:
+
+- **Click** - Select items
+- **Scroll** - Navigate lists
+
+## Terminal requirements
+
+### Supported terminals
+
+The TUI works best with modern terminal emulators:
+
+- **Linux/macOS**: iTerm2, Terminal.app, Alacritty, Kitty, GNOME Terminal
+- **Windows**: Windows Terminal, ConEmu, Cmder
+
+### Minimum terminal size
+
+Recommended: 80 columns x 24 rows or larger
+
+### Color support
+
+The TUI uses colors for better readability. Ensure your terminal supports:
+
+- 256-color mode (recommended)
+- True color (24-bit) for best experience
+
+## Architecture
+
+The TUI is built using:
+
+- **ratatui** - Terminal UI framework
+- **crossterm** - Cross-platform terminal control
+- **tokio** - Async runtime for non-blocking operations
+
+## Limitations
+
+### Read-only mode
+
+The current TUI implementation is primarily for browsing and viewing. For write operations, use the standard CLI commands.
+
+### Performance
+
+When browsing accounts with thousands of basins or streams, initial loading may take a moment. The TUI implements pagination to handle large datasets.
+
+## Troubleshooting
+
+### Terminal not restored after crash
+
+If the TUI exits unexpectedly and your terminal looks broken:
+
+```bash
+reset
+```
+
+This will restore your terminal to its normal state.
+
+### Display issues
+
+If you see garbled characters or layout problems:
+
+1. Verify your terminal supports UTF-8:
+   ```bash
+   echo $LANG
+   # Should show something like en_US.UTF-8
+   ```
+
+2. Try resizing your terminal window
+
+3. Ensure terminal is at least 80x24 characters
+
+### Mouse not working
+
+Mouse support depends on your terminal emulator. Not all terminals support mouse input in TUI applications.
+
+### Access token errors
+
+If you see authentication errors:
+
+1. Exit the TUI (press `q` or Ctrl+C)
+2. Configure your access token:
+   ```bash
+   s2 config set access_token YOUR_TOKEN
+   ```
+3. Relaunch: `s2 -i`
+
+## Using TUI over SSH
+
+The TUI works over SSH connections. Ensure:
+
+1. Your SSH client supports terminal emulation
+2. The `TERM` environment variable is set correctly:
+   ```bash
+   echo $TERM
+   # Should show xterm-256color, screen-256color, or similar
+   ```
+
+### SSH configuration
+
+For best results, enable terminal forwarding in your SSH config:
+
+```
+# ~/.ssh/config
+Host myserver
+  Hostname server.example.com
+  RequestTTY yes
+  SendEnv LANG LC_*
+```
+
+## Comparison with CLI commands
+
+| Task | TUI | CLI |
+|------|-----|-----|
+| Browse basins | Visual interface | `s2 list-basins` |
+| View streams | Navigate with arrows | `s2 list-streams` |
+| View config | Select and view | `s2 get-stream-config` |
+| Create basin | Not supported | `s2 create-basin` |
+| Append records | Not supported | `s2 append` |
+| Read records | Not supported | `s2 read` |
+
+## When to use interactive mode
+
+**Use the TUI when:**
+- Exploring basins and streams interactively
+- Viewing configurations and metadata
+- Learning the S2 structure of an account
+- Quick browsing without typing long commands
+
+**Use CLI commands when:**
+- Scripting and automation
+- CI/CD pipelines
+- Writing or reading records
+- Creating or modifying resources
+- Batch operations
+
+## Examples
+
+### Quick exploration
+
+```bash
+# Launch TUI to browse available basins
+s2 -i
+
+# Navigate through basins and streams
+# Press 'q' to exit when done
+```
+
+### Find stream configuration
+
+<Steps>
+  <Step title="Launch TUI">
+    ```bash
+    s2 -i
+    ```
+  </Step>
+  <Step title="Navigate to basin">
+    Use arrow keys to select the basin containing your stream.
+  </Step>
+  <Step title="Select stream">
+    Browse streams and select the one you want to inspect.
+  </Step>
+  <Step title="View configuration">
+    Press Enter to view detailed configuration.
+  </Step>
+  <Step title="Exit">
+    Press 'q' to exit the TUI.
+  </Step>
+</Steps>
+
+### TUI for discovery, CLI for operations
+
+```bash
+# Use TUI to find the stream you need
+s2 -i
+# Note the basin and stream names
+
+# Exit TUI (press 'q')
+
+# Use CLI for actual operations
+s2 read s2://basin-name/stream-name --count 100
+```
+
+## Future enhancements
+
+Planned features for the interactive mode include:
+
+- Creating basins and streams from TUI
+- Real-time stream tail viewer
+- Metrics and monitoring dashboards
+- Stream search and filtering
+- Configuration editing
+
+Check the [S2 roadmap](https://github.com/s2-streamstore/s2) for updates.
+
+## Accessibility
+
+### Screen readers
+
+The TUI's screen reader support is limited. For better accessibility, use the standard CLI commands with output piped to your preferred text-to-speech tool:
+
+```bash
+s2 list-basins | your-screen-reader
+```
+
+### High contrast mode
+
+Most terminals allow you to configure color schemes. Set your terminal to high contrast mode if needed for better visibility.

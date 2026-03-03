@@ -1,0 +1,414 @@
+---
+title: Record operations
+description: Append and read records from S2 streams
+---
+
+Records are the fundamental units of data in S2 streams. The CLI provides commands for appending, reading, and tailing records.
+
+## Append records
+
+Append records to a stream from stdin:
+
+```bash
+echo "Hello, S2!" | s2 append s2://my-basin/events
+```
+
+Output:
+```
+✓ [APPENDED] 0..0 // tail: 1 @ 1704067200000
+```
+
+This shows:
+- Sequence number range appended: `0..0` (single record)
+- New tail position: sequence `1`, timestamp `1704067200000`
+
+### Append from a file
+
+```bash
+s2 append s2://my-basin/events --input events.txt
+```
+
+Or using shell redirection:
+
+```bash
+s2 append s2://my-basin/events < events.txt
+```
+
+### Append multiple records
+
+Records are newline-delimited by default:
+
+```bash
+cat <<EOF | s2 append s2://my-basin/events
+First record
+Second record
+Third record
+EOF
+```
+
+Output:
+```
+✓ [APPENDED] 0..2 // tail: 3 @ 1704067200500
+```
+
+### Append JSON records
+
+Use the `--format json` flag for JSON records:
+
+```bash
+cat <<EOF | s2 append s2://my-basin/events --format json
+{"event": "user_login", "user_id": 123}
+{"event": "page_view", "page": "/home"}
+EOF
+```
+
+JSON records are still newline-delimited (one JSON object per line).
+
+### Append JSON with base64 bodies
+
+Use `--format json-base64` when record bodies contain binary data:
+
+```bash
+cat <<EOF | s2 append s2://my-basin/events --format json-base64
+{"body": "SGVsbG8sIFMyIQ==", "headers": [{"name": "content-type", "value": "text/plain"}]}
+EOF
+```
+
+### Append with fencing token
+
+Enforce a fencing token to coordinate writers:
+
+```bash
+echo "Data" | s2 append s2://my-basin/events --fencing-token "writer-1"
+```
+
+This append will be rejected if the stream's current fencing token doesn't match.
+
+### Append with sequence number match
+
+Only append if the next sequence number matches the expected value:
+
+```bash
+echo "Data" | s2 append s2://my-basin/events --match-seq-num 100
+```
+
+This is useful for ensuring no records were appended by another writer.
+
+### Control batching with linger
+
+Adjust how long to wait before flushing a batch:
+
+```bash
+cat large-file.txt | s2 append s2://my-basin/events --linger 100ms
+```
+
+Default: `5ms`
+
+Lower values reduce latency but may increase number of API calls. Higher values improve throughput for bulk appends.
+
+## Read records
+
+Read all records from a stream:
+
+```bash
+s2 read s2://my-basin/events
+```
+
+Output:
+```
+⦿ 1024 bytes (10 records in range 0..=9)
+First record
+Second record
+...
+```
+
+By default, `read` will tail the stream indefinitely, waiting for new records. Use `--count` or press Ctrl+C to stop.
+
+### Read a specific number of records
+
+```bash
+s2 read s2://my-basin/events --count 100
+```
+
+Reads the first 100 records and exits.
+
+### Read from a specific sequence number
+
+```bash
+s2 read s2://my-basin/events --seq-num 1000
+```
+
+Starts reading from sequence number 1000 (inclusive).
+
+### Read from a timestamp
+
+Read records from a specific Unix timestamp (milliseconds):
+
+```bash
+s2 read s2://my-basin/events --timestamp 1704067200000
+```
+
+Or use a human-friendly relative time:
+
+```bash
+s2 read s2://my-basin/events --ago 1h
+s2 read s2://my-basin/events --ago 24h
+s2 read s2://my-basin/events --ago 7d
+```
+
+### Read the last N records
+
+Read starting from N records before the tail:
+
+```bash
+s2 read s2://my-basin/events --tail-offset 100
+```
+
+Reads the last 100 records.
+
+### Limit by bytes
+
+Stop reading after consuming a certain number of bytes:
+
+```bash
+s2 read s2://my-basin/events --bytes 10485760  # 10 MiB
+```
+
+### Read until a timestamp
+
+Read records up to (but not including) a specific timestamp:
+
+```bash
+s2 read s2://my-basin/events --timestamp 1704067200000 --until 1704070800000
+```
+
+### Clamp start position at tail
+
+If the requested start position is beyond the tail, start at the tail instead of returning an error:
+
+```bash
+s2 read s2://my-basin/events --seq-num 999999 --clamp
+```
+
+### Output to a file
+
+```bash
+s2 read s2://my-basin/events --count 1000 --output records.txt
+```
+
+Or using shell redirection:
+
+```bash
+s2 read s2://my-basin/events --count 1000 > records.txt
+```
+
+### Read formats
+
+**Text format (default):**
+```bash
+s2 read s2://my-basin/events --format text
+```
+
+Outputs raw record bodies, one per line.
+
+**JSON format:**
+```bash
+s2 read s2://my-basin/events --format json
+```
+
+Outputs records as JSON objects with metadata:
+```json
+{"seq_num":0,"timestamp":1704067200000,"body":"First record","headers":[]}
+{"seq_num":1,"timestamp":1704067200100,"body":"Second record","headers":[]}
+```
+
+**JSON with base64 bodies:**
+```bash
+s2 read s2://my-basin/events --format json-base64
+```
+
+Outputs records with base64-encoded bodies:
+```json
+{"seq_num":0,"timestamp":1704067200000,"body":"Rmlyc3QgcmVjb3Jk","headers":[]}
+```
+
+## Tail a stream
+
+Show the last N records (like Unix `tail`):
+
+```bash
+s2 tail s2://my-basin/events
+```
+
+Default: Shows last 10 records and exits.
+
+### Specify number of records
+
+```bash
+s2 tail s2://my-basin/events --lines 100
+# or short form
+s2 tail s2://my-basin/events -n 100
+```
+
+### Follow mode
+
+Continuously show new records (like `tail -f`):
+
+```bash
+s2 tail s2://my-basin/events --follow
+# or short form
+s2 tail s2://my-basin/events -f
+```
+
+Press Ctrl+C to stop following.
+
+### Tail output formats
+
+Same format options as `read`:
+
+```bash
+s2 tail s2://my-basin/events -f --format json
+```
+
+## Common workflows
+
+### Stream processing pipeline
+
+```bash
+# Read records, process with jq, append to another stream
+s2 read s2://raw/events --format json --count 1000 \
+  | jq -c 'select(.user_id != null)' \
+  | s2 append s2://filtered/events --format json
+```
+
+### Export records to file
+
+```bash
+# Export all records from the last 24 hours
+s2 read s2://prod/events --ago 24h --format json > events-$(date +%Y%m%d).jsonl
+```
+
+### Continuous monitoring
+
+```bash
+# Monitor events in real-time
+s2 tail s2://prod/events -f --format json | jq -c 'select(.level == "error")'
+```
+
+### Bulk import from file
+
+```bash
+# Import records with progress indication
+pv large-dataset.txt | s2 append s2://imports/dataset --linger 100ms
+```
+
+### Replay records to different stream
+
+```bash
+# Replay records from specific time range
+s2 read s2://prod/events \
+  --timestamp 1704067200000 \
+  --until 1704070800000 \
+  | s2 append s2://dev/events
+```
+
+### Coordinated append with fencing
+
+```bash
+#!/bin/bash
+# Set fencing token for this writer
+WRITER_ID="writer-$(hostname)-$$"
+s2 fence s2://prod/events "$WRITER_ID"
+
+# Append with fencing protection
+while read -r line; do
+  echo "$line" | s2 append s2://prod/events --fencing-token "$WRITER_ID"
+done
+```
+
+### Incremental backup
+
+```bash
+#!/bin/bash
+# Track last backed up sequence number
+LAST_SEQ=$(cat .last-backup-seq 2>/dev/null || echo 0)
+
+# Read new records since last backup
+s2 read s2://prod/events --seq-num $LAST_SEQ --count 10000 > backup-$(date +%Y%m%d-%H%M%S).txt
+
+# Update checkpoint
+TAIL=$(s2 check-tail s2://prod/events | awk '{print $1}')
+echo $TAIL > .last-backup-seq
+```
+
+## Appending command records
+
+Certain operations like `trim` and `fence` append special command records to the stream. When reading with `--format text`, these are displayed as:
+
+```
+trim to 10000 // 12345 @ 1704067200000
+new fencing token "my-token" // 12346 @ 1704067200100
+```
+
+These command records are not included in the record body output.
+
+## Performance tips
+
+### Batching
+
+- Use `--linger` to control batch size vs. latency tradeoff
+- Larger batches (higher linger) improve throughput
+- Smaller batches (lower linger) reduce latency
+
+### Reading
+
+- Use `--count` or `--bytes` to limit reads
+- Filter records early in the pipeline to reduce data transfer
+- Use `--format text` for better performance if metadata isn't needed
+
+### Network usage
+
+Enable compression in your CLI configuration:
+
+```bash
+s2 config set compression zstd
+```
+
+## Examples
+
+### Append timestamped events
+
+```bash
+while true; do
+  echo "{\"timestamp\": $(date +%s000), \"message\": \"heartbeat\"}" \
+    | s2 append s2://monitoring/heartbeat --format json
+  sleep 60
+done
+```
+
+### Read and count records
+
+```bash
+s2 read s2://prod/events --count 10000 --format json \
+  | jq -r '.event' \
+  | sort \
+  | uniq -c \
+  | sort -rn
+```
+
+### Tail with filtering
+
+```bash
+s2 tail s2://prod/logs -f --format json \
+  | jq -r 'select(.level == "error") | "\(.timestamp) \(.message)"'
+```
+
+### Read records from specific hour
+
+```bash
+# Read records from 2024-01-01 14:00:00 to 14:59:59
+START=$(date -d "2024-01-01 14:00:00" +%s)000
+END=$(date -d "2024-01-01 15:00:00" +%s)000
+
+s2 read s2://prod/events --timestamp $START --until $END
+```

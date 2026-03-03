@@ -1,0 +1,221 @@
+---
+title: 'Check Tail Position'
+description: 'Get the current tail position of a stream'
+---
+
+## HEAD /streams/{stream}/records/tail
+
+Retrieve the current tail position of a stream without reading any records. This is useful for:
+
+- Determining the current size of a stream
+- Finding the starting position for a tail read
+- Checking if new records have been appended since last read
+- Verifying stream existence
+
+### Authentication
+
+Requires a valid access token with read permissions to the stream.
+
+### Path Parameters
+
+<ParamField path="stream" type="string" required>
+  Stream name to check.
+</ParamField>
+
+### Headers
+
+<ParamField header="S2-Basin" type="string" required>
+  Basin name where the stream resides.
+</ParamField>
+
+### Response
+
+<ResponseField name="tail" type="object" required>
+  Current tail position of the stream.
+  
+  <Expandable title="StreamPosition fields">
+    <ResponseField name="seq_num" type="uint64">
+      Next sequence number to be assigned.
+      
+      This is the sequence number that will be assigned to the next record appended to the stream. If the stream is empty, this will be 0.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp of the last record in milliseconds since Unix epoch.
+      
+      If the stream is empty, this will be 0.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Status Codes
+
+- `200 OK` - Tail position successfully retrieved
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Stream does not exist
+- `408 Request Timeout` - Operation timed out
+- `409 Conflict` - Stream is being deleted
+
+## Examples
+
+### Check tail position
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+### Response
+
+```json
+{
+  "tail": {
+    "seq_num": 1000,
+    "timestamp": 1709481250000
+  }
+}
+```
+
+This indicates:
+- The stream has 1000 records (seq_num 0-999)
+- The next append will receive seq_num 1000
+- The last record has timestamp 1709481250000
+
+### Empty stream
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/new-stream/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+```json
+{
+  "tail": {
+    "seq_num": 0,
+    "timestamp": 0
+  }
+}
+```
+
+Both fields are 0, indicating an empty stream.
+
+### Use tail for conditional append
+
+```bash
+# First, check the tail
+TAIL_RESPONSE=$(curl -s -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin")
+
+TAIL_SEQ_NUM=$(echo $TAIL_RESPONSE | jq -r '.tail.seq_num')
+
+# Then append with match_seq_num to ensure no concurrent appends
+curl -X POST "https://mybasin.b.aws.s2.dev/v1/streams/events/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"records\": [{\"body\": \"dGVzdA==\"}],
+    \"match_seq_num\": $TAIL_SEQ_NUM
+  }"
+```
+
+### Check for new records
+
+```bash
+# Store the last known tail
+LAST_TAIL=950
+
+# Check current tail
+CURRENT_TAIL=$(curl -s -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" | jq -r '.tail.seq_num')
+
+if [ $CURRENT_TAIL -gt $LAST_TAIL ]; then
+  echo "New records available: $((CURRENT_TAIL - LAST_TAIL))"
+  
+  # Read new records
+  curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?seq_num=$LAST_TAIL&count=$((CURRENT_TAIL - LAST_TAIL))" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "S2-Basin: mybasin"
+else
+  echo "No new records"
+fi
+```
+
+### Verify stream exists
+
+```bash
+if curl -s -f -X GET "https://mybasin.b.aws.s2.dev/v1/streams/maybe-exists/records/tail" \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "S2-Basin: mybasin" > /dev/null 2>&1; then
+  echo "Stream exists"
+else
+  echo "Stream does not exist or is inaccessible"
+fi
+```
+
+## Use Cases
+
+### Stream Size Calculation
+
+The `seq_num` in the tail response represents the total number of records in the stream (since sequence numbers start at 0).
+
+```bash
+TAIL=$(curl -s -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" | jq '.tail.seq_num')
+
+echo "Stream contains $TAIL records"
+```
+
+### Efficient Polling
+
+Instead of repeatedly reading records, poll the tail position to detect changes:
+
+```bash
+while true; do
+  TAIL=$(curl -s -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "S2-Basin: mybasin" | jq -r '.tail.seq_num')
+  
+  if [ "$TAIL" != "$LAST_TAIL" ]; then
+    echo "Tail changed: $LAST_TAIL -> $TAIL"
+    LAST_TAIL=$TAIL
+  fi
+  
+  sleep 5
+done
+```
+
+For real-time updates, prefer using [streaming reads](/api/records/read-session) instead.
+
+### Read from N Minutes Ago
+
+Combine tail check with timestamp-based reads:
+
+```bash
+# Get current tail timestamp
+TAIL_TS=$(curl -s -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records/tail" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" | jq -r '.tail.timestamp')
+
+# Calculate timestamp 5 minutes ago
+START_TS=$((TAIL_TS - 300000))  # 5 minutes in milliseconds
+
+# Read records from that point
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?timestamp=$START_TS" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+## Notes
+
+- This is a lightweight operation that doesn't read record data
+- The tail position may change immediately after this call due to concurrent appends
+- For empty streams, both `seq_num` and `timestamp` are 0
+- Sequence numbers are always contiguous with no gaps
+- The timestamp of the tail represents the last record's timestamp, not the current time
+- Deleted streams return `404 Not Found`, not a zero tail

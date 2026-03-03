@@ -1,0 +1,355 @@
+---
+title: Installation
+description: Install the S2 CLI and SDKs for your platform
+---
+
+# Installation
+
+This guide covers installing the S2 CLI and SDKs for various platforms and languages.
+
+## S2 CLI
+
+The S2 CLI provides command-line access to S2 and includes S2 Lite embedded as the `s2 lite` subcommand.
+
+<Note>
+The CLI is distributed as `s2-cli` in package managers but the binary is named `s2`.
+</Note>
+
+### Homebrew (macOS/Linux)
+
+The recommended way to install on macOS and Linux:
+
+```bash
+brew install s2-streamstore/s2/s2
+```
+
+To upgrade to the latest version:
+
+```bash
+brew upgrade s2
+```
+
+### Cargo (Rust)
+
+Install using Cargo if you have Rust installed:
+
+```bash
+cargo install --locked s2-cli
+```
+
+The `--locked` flag ensures you get the exact dependency versions tested with the release.
+
+<Tip>
+This method works on any platform with Rust installed, including Windows.
+</Tip>
+
+### Installation script (macOS/Linux)
+
+Download and install the latest release binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+```
+
+To install a specific version:
+
+```bash
+VERSION=0.29.0 curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+```
+
+<CodeGroup>
+```bash Latest version
+curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+```
+
+```bash Specific version
+VERSION=0.29.0 curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+```
+
+```bash Silent installation
+SILENT=1 curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+```
+</CodeGroup>
+
+See all available versions in the [releases](https://github.com/s2-streamstore/s2/releases) page.
+
+### Docker
+
+Pull the S2 Docker image which includes both the CLI and S2 Lite:
+
+```bash
+docker pull ghcr.io/s2-streamstore/s2
+```
+
+Run S2 Lite in a container:
+
+```bash
+# In-memory mode
+docker run -p 8080:80 ghcr.io/s2-streamstore/s2 lite
+
+# With AWS S3
+docker run -p 8080:80 \
+  -e AWS_PROFILE=${AWS_PROFILE} \
+  -v ~/.aws:/home/nonroot/.aws:ro \
+  ghcr.io/s2-streamstore/s2 lite \
+  --bucket ${S3_BUCKET} \
+  --path s2lite
+
+# With static credentials (Tigris, Cloudflare R2, etc.)
+docker run -p 8080:80 \
+  -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
+  -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
+  -e AWS_ENDPOINT_URL_S3=${AWS_ENDPOINT_URL_S3} \
+  ghcr.io/s2-streamstore/s2 lite \
+  --bucket ${S3_BUCKET} \
+  --path s2lite
+```
+
+<Tip>
+The in-memory mode is perfect for integration tests and local development.
+</Tip>
+
+### Kubernetes (Helm)
+
+Deploy S2 Lite to Kubernetes using Helm:
+
+```bash
+helm repo add s2 https://s2-streamstore.github.io/s2
+helm install my-s2-lite s2/s2-lite-helm
+```
+
+See the [Helm chart documentation](https://github.com/s2-streamstore/s2/tree/main/charts/s2-lite-helm) for configuration options.
+
+### Verify installation
+
+Check that the CLI is installed correctly:
+
+```bash
+s2 --version
+```
+
+You should see output like:
+
+```
+s2-cli 0.29.18
+```
+
+## SDKs
+
+S2 provides official SDKs for multiple languages.
+
+### Rust SDK
+
+Add the S2 SDK to your `Cargo.toml`:
+
+```bash
+cargo add s2-sdk
+```
+
+You'll also need async runtime dependencies:
+
+```bash
+cargo add tokio --features full
+cargo add futures
+```
+
+<CodeGroup>
+```toml Cargo.toml
+[dependencies]
+s2-sdk = "0.24"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+```
+
+```rust Basic usage
+use s2_sdk::{S2, types::S2Config};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = S2::new(S2Config::new(std::env::var("S2_ACCESS_TOKEN")?))?;
+    
+    let basin = client.basin("my-basin".parse()?);
+    let stream = basin.stream("my-stream".parse()?);
+    
+    Ok(())
+}
+```
+</CodeGroup>
+
+**Documentation:**
+- [Crates.io](https://crates.io/crates/s2-sdk)
+- [API docs](https://docs.rs/s2-sdk/latest/s2_sdk/)
+- [Examples](https://github.com/s2-streamstore/s2/tree/main/sdk/examples)
+
+### TypeScript SDK
+
+Install via npm:
+
+```bash
+npm install s2-sdk-js
+```
+
+Or with other package managers:
+
+<CodeGroup>
+```bash npm
+npm install s2-sdk-js
+```
+
+```bash yarn
+yarn add s2-sdk-js
+```
+
+```bash pnpm
+pnpm add s2-sdk-js
+```
+
+```bash bun
+bun add s2-sdk-js
+```
+</CodeGroup>
+
+**Compatibility:** Requires SDK v0.22 or later
+
+**Documentation:**
+- [GitHub repository](https://github.com/s2-streamstore/s2-sdk-typescript)
+- [npm package](https://www.npmjs.com/package/s2-sdk-js)
+
+### Go SDK
+
+Install the Go SDK:
+
+```bash
+go get github.com/s2-streamstore/s2-sdk-go
+```
+
+**Compatibility:** Requires SDK v0.11 or later
+
+**Documentation:**
+- [GitHub repository](https://github.com/s2-streamstore/s2-sdk-go)
+- [pkg.go.dev](https://pkg.go.dev/github.com/s2-streamstore/s2-sdk-go)
+
+### Python SDK
+
+<Warning>
+The Python SDK needs to be migrated to the v1 API. It currently only supports the older API version.
+</Warning>
+
+Install via pip:
+
+```bash
+pip install s2-sdk-python
+```
+
+**Documentation:**
+- [GitHub repository](https://github.com/s2-streamstore/s2-sdk-python)
+
+### Java SDK
+
+<Warning>
+The Java SDK needs to be migrated to the v1 API. It currently only supports the older API version.
+</Warning>
+
+**Documentation:**
+- [GitHub repository](https://github.com/s2-streamstore/s2-sdk-java)
+
+## Configuration
+
+After installation, configure the CLI and SDKs with your credentials.
+
+### Using S2 cloud
+
+For the managed S2 service:
+
+<Steps>
+  <Step title="Get access token">
+    Generate an access token from the [S2 dashboard](https://s2.dev/dashboard)
+  </Step>
+  <Step title="Set environment variable">
+    Export your access token:
+    ```bash
+    export S2_ACCESS_TOKEN="your-access-token-here"
+    ```
+  </Step>
+  <Step title="Test connection">
+    Verify the configuration:
+    ```bash
+    s2 list-basins
+    ```
+  </Step>
+</Steps>
+
+### Using S2 Lite
+
+For local development with S2 Lite:
+
+```bash
+# Start S2 Lite
+s2 lite --port 8080
+
+# In another terminal, configure the CLI
+export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+export S2_BASIN_ENDPOINT="http://localhost:8080"
+export S2_ACCESS_TOKEN="ignored"
+```
+
+<Note>
+S2 Lite doesn't require authentication for local use, but you still need to set `S2_ACCESS_TOKEN` to any non-empty value.
+</Note>
+
+### Configuration file
+
+You can also create a configuration file at `~/.config/s2/config.toml`:
+
+```toml
+access_token = "your-access-token"
+
+# Optional: Override endpoints for S2 Lite
+# account_endpoint = "http://localhost:8080"
+# basin_endpoint = "http://localhost:8080"
+```
+
+## Building from source
+
+To build the CLI from source:
+
+```bash
+# Clone the repository
+git clone https://github.com/s2-streamstore/s2.git
+cd s2
+
+# Build with Cargo
+cargo build --release --package s2-cli
+
+# The binary will be at target/release/s2
+./target/release/s2 --version
+```
+
+<Tip>
+Make sure you have Rust 1.70 or later installed. The project uses Rust edition 2024.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Create your first basin and stream
+  </Card>
+  <Card title="Concepts" icon="book" href="/concepts/overview">
+    Learn about basins, streams, and records
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Explore all CLI commands
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Browse the REST API documentation
+  </Card>
+</CardGroup>
+
+## Getting help
+
+If you run into issues:
+
+- Check the [GitHub issues](https://github.com/s2-streamstore/s2/issues)
+- Join the [Discord community](https://discord.gg/vTCs7kMkAf)
+- Email support at [hi@s2.dev](mailto:hi@s2.dev)

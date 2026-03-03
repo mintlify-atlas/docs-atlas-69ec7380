@@ -1,0 +1,244 @@
+---
+title: 'API Overview'
+description: 'Introduction to the S2 REST API and streaming protocols'
+---
+
+## Introduction
+
+S2 provides a REST API for managing durable streams and streaming data. The API is designed for:
+
+- **Real-time streaming** - Continuous reads and writes with SSE and S2S protocols
+- **Durability** - All data is persisted to object storage before acknowledgment
+- **Scalability** - Serverless architecture with automatic scaling
+- **Simplicity** - Clean REST endpoints with JSON and Protocol Buffer support
+
+## Base URLs
+
+S2 uses two different endpoint types:
+
+### Account Endpoint
+
+Used for account-level operations like managing basins and access tokens.
+
+```
+https://account.s2.dev
+```
+
+### Basin Endpoint  
+
+Used for stream operations within a specific basin. Each basin can have its own endpoint.
+
+```
+https://<basin-name>.s2.dev
+```
+
+For self-hosted S2 Lite instances, configure both endpoints to point to your server:
+
+```bash
+export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+export S2_BASIN_ENDPOINT="http://localhost:8080"
+```
+
+## API Versioning
+
+All API endpoints are versioned under the `/v1` path prefix:
+
+```
+GET /v1/basins
+GET /v1/basins/{basin}/streams
+POST /v1/basins/{basin}/streams/{stream}/append
+```
+
+<Note>
+The current API version is `v1`. Future versions will be introduced under new path prefixes while maintaining backwards compatibility.
+</Note>
+
+## Content Types
+
+The S2 API supports multiple content types:
+
+| Content Type | Use Case |
+|--------------|----------|
+| `application/json` | REST API requests and responses |
+| `application/protobuf` | Binary protocol buffer format for efficiency |
+| `text/event-stream` | Server-Sent Events for streaming reads |
+| `s2s/proto` | S2S streaming session protocol |
+
+## Request/Response Formats
+
+### JSON Format
+
+Default format for most REST endpoints:
+
+```bash
+curl -X POST https://account.s2.dev/v1/basins \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "basin": "my-basin",
+    "config": {
+      "storage_class": "standard"
+    }
+  }'
+```
+
+### Protocol Buffers
+
+For high-performance scenarios, use Protocol Buffers:
+
+```bash
+curl -X POST https://basin.s2.dev/v1/basins/my-basin/streams/my-stream/append \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/protobuf" \
+  -H "Accept: application/protobuf" \
+  --data-binary @append_input.pb
+```
+
+## Core Resources
+
+The S2 API is organized around three main resources:
+
+### Basins
+
+A basin is a namespace for streams with shared configuration.
+
+**Key operations:**
+- Create basin
+- List basins  
+- Configure basin settings
+- Delete basin
+
+### Streams
+
+A stream is a durable, ordered log of records within a basin.
+
+**Key operations:**
+- Create stream
+- List streams
+- Configure stream settings  
+- Delete stream
+- Check tail position
+
+### Records
+
+Records are the data items stored in streams.
+
+**Key operations:**
+- Append records (write)
+- Read records (query historical or stream real-time)
+- Trim records (delete old data)
+
+## Streaming Protocols
+
+S2 supports three methods for reading streams:
+
+### 1. Unary Read (REST)
+
+Simple HTTP request/response for batch reads:
+
+```bash
+GET /v1/basins/{basin}/streams/{stream}/read?count=100
+```
+
+### 2. Server-Sent Events (SSE)
+
+Real-time streaming using standard SSE protocol:
+
+```bash
+GET /v1/basins/{basin}/streams/{stream}/read
+Accept: text/event-stream
+```
+
+### 3. S2S Streaming Sessions
+
+Bi-directional streaming protocol optimized for S2:
+
+- Binary framed protocol with compression (gzip, zstd)
+- Supports streaming reads and writes
+- Lower latency and higher throughput than SSE
+
+See [S2S Protocol](/api/s2s-protocol) for details.
+
+## Rate Limits
+
+<Info>
+S2 automatically scales to handle your workload. Rate limits are applied per account to ensure fair usage.
+</Info>
+
+When rate limited, responses include:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After-Ms: 1000
+```
+
+## Error Handling
+
+The API uses standard HTTP status codes:
+
+| Status Code | Meaning |
+|-------------|----------|
+| `200 OK` | Request successful |
+| `201 Created` | Resource created successfully |
+| `400 Bad Request` | Invalid request parameters |
+| `401 Unauthorized` | Missing or invalid access token |
+| `403 Forbidden` | Token lacks required permissions |
+| `404 Not Found` | Resource does not exist |
+| `409 Conflict` | Resource already exists or condition failed |
+| `416 Range Not Satisfiable` | Read position beyond stream tail |
+| `429 Too Many Requests` | Rate limit exceeded |
+| `500 Internal Server Error` | Server error |
+
+### Error Response Format
+
+Error responses include a JSON body with details:
+
+```json
+{
+  "error": "validation_error",
+  "message": "Stream name must be between 1 and 512 bytes"
+}
+```
+
+## Idempotency
+
+For write operations, use the `s2-request-token` header to ensure idempotent retries:
+
+```bash
+curl -X POST https://account.s2.dev/v1/basins \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "s2-request-token: unique-token-123" \
+  -H "Content-Type: application/json" \
+  -d '{...}'
+```
+
+<Note>
+The request token must be unique per operation. If the same token is used for an identical request, S2 will return the original response without re-executing the operation.
+</Note>
+
+## Compression
+
+S2 supports compression for both requests and responses:
+
+**Request compression:**
+```bash
+Content-Encoding: gzip
+```
+
+**Response compression:**
+```bash
+Accept-Encoding: gzip, zstd
+```
+
+For S2S streaming sessions, compression is negotiated automatically and applied at the frame level.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn how to authenticate API requests with access tokens
+  </Card>
+  <Card title="S2S Protocol" icon="arrows-rotate" href="/api/s2s-protocol">
+    Understand the S2S streaming session protocol
+  </Card>
+</CardGroup>

@@ -1,0 +1,774 @@
+---
+title: Production Deployment
+description: Deploy S2 Lite in production with Kubernetes, Helm, and best practices
+---
+
+## Overview
+
+This guide covers production deployment of S2 Lite using Kubernetes and Helm, including TLS, monitoring, high availability considerations, and security best practices.
+
+## Prerequisites
+
+- Kubernetes cluster (1.19+)
+- Helm 3.0+
+- kubectl configured
+- S3-compatible object storage bucket
+- (Optional) Prometheus Operator for metrics
+
+## Quick Start
+
+### Install from Helm Repository
+
+<Steps>
+  <Step title="Add the S2 Helm repository">
+    ```bash
+    helm repo add s2 https://s2-streamstore.github.io/s2
+    helm repo update
+    ```
+  </Step>
+  
+  <Step title="Install with default settings (in-memory)">
+    ```bash
+    # For testing only - data not persisted
+    helm install my-s2-lite s2/s2-lite-helm
+    ```
+  </Step>
+  
+  <Step title="Install with S3 storage (production)">
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm \
+      --set objectStorage.enabled=true \
+      --set objectStorage.bucket=my-s2-bucket \
+      --set objectStorage.path=s2lite
+    ```
+  </Step>
+</Steps>
+
+### Install from OCI Registry (GitHub Container Registry)
+
+```bash
+# Install directly from GHCR
+helm install my-s2-lite oci://ghcr.io/s2-streamstore/charts/s2-lite-helm
+
+# Or with custom values
+helm install my-s2-lite oci://ghcr.io/s2-streamstore/charts/s2-lite-helm \
+  --set objectStorage.enabled=true \
+  --set objectStorage.bucket=my-s2-bucket
+```
+
+## Production Configuration
+
+### Complete values.yaml Example
+
+Create a `values.yaml` file for your production deployment:
+
+```yaml
+# Production values.yaml for S2 Lite
+
+# Number of replicas (Note: S2 Lite is currently single-node)
+replicaCount: 1
+
+image:
+  repository: ghcr.io/s2-streamstore/s2
+  pullPolicy: IfNotPresent
+  tag: "0.29.17"  # Pin to specific version in production
+
+# Object Storage Configuration
+objectStorage:
+  enabled: true
+  bucket: production-s2-bucket
+  path: s2lite
+  # Leave empty for AWS S3, or set for other providers:
+  # endpoint: https://fly.storage.tigris.dev
+
+# Service Configuration
+service:
+  type: LoadBalancer
+  port: 443  # HTTPS
+  annotations:
+    # AWS Network Load Balancer
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # External DNS (optional)
+    external-dns.alpha.kubernetes.io/hostname: "s2.example.com"
+
+# TLS Configuration
+tls:
+  enabled: true
+  # Option 1: Self-signed (for testing)
+  selfSigned: false
+  # Option 2: Provided certificate (production)
+  cert: /etc/tls/tls.crt
+  key: /etc/tls/tls.key
+
+# Mount TLS certificates from Kubernetes secret
+volumes:
+  - name: tls-certs
+    secret:
+      secretName: s2-lite-tls
+
+volumeMounts:
+  - name: tls-certs
+    mountPath: /etc/tls
+    readOnly: true
+
+# Service Account (for IRSA/Workload Identity)
+serviceAccount:
+  create: true
+  annotations:
+    # AWS IRSA
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/s2-lite-role
+    # GCP Workload Identity
+    # iam.gke.io/gcp-service-account: s2-lite@project-id.iam.gserviceaccount.com
+
+# Resource Limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+# Health Checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60  # Allow up to 10 minutes for startup
+
+# Prometheus Monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Environment Variables
+env:
+  - name: SL8_FLUSH_INTERVAL
+    value: "50ms"
+  - name: SL8_MANIFEST_POLL_INTERVAL
+    value: "5s"
+  # Enable pipelining (experimental)
+  # - name: S2LITE_PIPELINE
+  #   value: "true"
+
+# Node Selection (optional)
+nodeSelector:
+  workload: streaming
+
+# Tolerations (optional)
+tolerations:
+  - key: "workload"
+    operator: "Equal"
+    value: "streaming"
+    effect: "NoSchedule"
+
+# Affinity (optional)
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: s2-lite
+          topologyKey: kubernetes.io/hostname
+```
+
+Deploy with:
+
+```bash
+helm install s2-lite s2/s2-lite-helm -f values.yaml -n s2-system --create-namespace
+```
+
+## TLS Configuration
+
+### Option 1: Self-Signed Certificate (Testing)
+
+```yaml
+tls:
+  enabled: true
+  selfSigned: true
+```
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm \
+  --set tls.enabled=true \
+  --set tls.selfSigned=true
+
+# Configure CLI to trust self-signed cert
+s2 config set ssl_no_verify true
+```
+
+<Warning>
+Self-signed certificates should only be used for testing. Use proper certificates in production.
+</Warning>
+
+### Option 2: Provided Certificate (Production)
+
+<Steps>
+  <Step title="Create TLS secret">
+    ```bash
+    kubectl create secret tls s2-lite-tls \
+      --cert=tls.crt \
+      --key=tls.key \
+      -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Configure Helm values">
+    ```yaml
+    tls:
+      enabled: true
+      cert: /etc/tls/tls.crt
+      key: /etc/tls/tls.key
+    
+    volumes:
+      - name: tls-certs
+        secret:
+          secretName: s2-lite-tls
+    
+    volumeMounts:
+      - name: tls-certs
+        mountPath: /etc/tls
+        readOnly: true
+    ```
+  </Step>
+  
+  <Step title="Deploy">
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml -n s2-system
+    ```
+  </Step>
+</Steps>
+
+### Option 3: cert-manager Integration
+
+<Steps>
+  <Step title="Install cert-manager">
+    ```bash
+    helm install cert-manager jetstack/cert-manager \
+      --namespace cert-manager \
+      --create-namespace \
+      --set installCRDs=true
+    ```
+  </Step>
+  
+  <Step title="Create ClusterIssuer">
+    ```yaml
+    apiVersion: cert-manager.io/v1
+    kind: ClusterIssuer
+    metadata:
+      name: letsencrypt-prod
+    spec:
+      acme:
+        server: https://acme-v02.api.letsencrypt.org/directory
+        email: admin@example.com
+        privateKeySecretRef:
+          name: letsencrypt-prod
+        solvers:
+        - http01:
+            ingress:
+              class: nginx
+    ```
+  </Step>
+  
+  <Step title="Create Certificate">
+    ```yaml
+    apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: s2-lite-tls
+      namespace: s2-system
+    spec:
+      secretName: s2-lite-tls
+      issuerRef:
+        name: letsencrypt-prod
+        kind: ClusterIssuer
+      dnsNames:
+      - s2.example.com
+    ```
+  </Step>
+</Steps>
+
+## Cloud Provider Examples
+
+### AWS EKS with IRSA
+
+<Steps>
+  <Step title="Create IAM policy">
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::my-s2-bucket",
+            "arn:aws:s3:::my-s2-bucket/*"
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Create IAM role with OIDC">
+    ```bash
+    eksctl create iamserviceaccount \
+      --name s2-lite \
+      --namespace s2-system \
+      --cluster my-cluster \
+      --region us-east-1 \
+      --attach-policy-arn arn:aws:iam::123456789012:policy/S2LiteS3Policy \
+      --approve
+    ```
+  </Step>
+  
+  <Step title="Deploy with IRSA annotations">
+    ```yaml
+    objectStorage:
+      enabled: true
+      bucket: my-s2-bucket
+    
+    serviceAccount:
+      create: true
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/eksctl-my-cluster-addon-iamserviceaccount-Role
+    
+    service:
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-type: nlb
+        external-dns.alpha.kubernetes.io/hostname: s2.example.com
+    ```
+  </Step>
+</Steps>
+
+### GCP GKE with Workload Identity
+
+<Steps>
+  <Step title="Create GCP service account">
+    ```bash
+    gcloud iam service-accounts create s2-lite \
+      --display-name="S2 Lite Service Account"
+    ```
+  </Step>
+  
+  <Step title="Grant GCS permissions">
+    ```bash
+    gcloud projects add-iam-policy-binding PROJECT_ID \
+      --member="serviceAccount:s2-lite@PROJECT_ID.iam.gserviceaccount.com" \
+      --role="roles/storage.objectAdmin"
+    ```
+  </Step>
+  
+  <Step title="Bind Kubernetes SA to GCP SA">
+    ```bash
+    gcloud iam service-accounts add-iam-policy-binding \
+      s2-lite@PROJECT_ID.iam.gserviceaccount.com \
+      --role roles/iam.workloadIdentityUser \
+      --member "serviceAccount:PROJECT_ID.svc.id.goog[s2-system/s2-lite]"
+    ```
+  </Step>
+  
+  <Step title="Deploy with Workload Identity">
+    ```yaml
+    serviceAccount:
+      create: true
+      annotations:
+        iam.gke.io/gcp-service-account: s2-lite@PROJECT_ID.iam.gserviceaccount.com
+    
+    objectStorage:
+      enabled: true
+      bucket: gs://my-s2-bucket
+    ```
+  </Step>
+</Steps>
+
+### Azure AKS with Managed Identity
+
+<Steps>
+  <Step title="Create managed identity">
+    ```bash
+    az identity create \
+      --name s2-lite-identity \
+      --resource-group my-rg \
+      --location eastus
+    ```
+  </Step>
+  
+  <Step title="Grant storage permissions">
+    ```bash
+    az role assignment create \
+      --role "Storage Blob Data Contributor" \
+      --assignee $(az identity show --name s2-lite-identity --resource-group my-rg --query principalId -o tsv) \
+      --scope /subscriptions/SUBSCRIPTION_ID/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/myaccount
+    ```
+  </Step>
+  
+  <Step title="Deploy with pod identity">
+    ```yaml
+    serviceAccount:
+      create: true
+      annotations:
+        azure.workload.identity/client-id: CLIENT_ID
+    
+    objectStorage:
+      enabled: true
+      bucket: my-container
+      endpoint: https://myaccount.blob.core.windows.net
+    ```
+  </Step>
+</Steps>
+
+## Monitoring & Observability
+
+### Prometheus Integration
+
+With Prometheus Operator installed:
+
+```yaml
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+```
+
+### Key Metrics to Monitor
+
+- `s2_lite_append_duration_seconds` - Append latency histogram
+- `s2_lite_read_duration_seconds` - Read latency histogram
+- `s2_lite_active_streams` - Number of active streams
+- `s2_lite_active_sessions` - Number of active client sessions
+- `slatedb_*` - SlateDB internal metrics
+
+### Grafana Dashboard
+
+Query the `/metrics` endpoint to build dashboards:
+
+```bash
+kubectl port-forward svc/my-s2-lite 8080:80 -n s2-system
+curl http://localhost:8080/metrics
+```
+
+## High Availability Considerations
+
+<Warning>
+**Important**: S2 Lite is currently a single-node deployment. The `Recreate` deployment strategy ensures only one instance writes to the object store at a time, preventing data corruption.
+</Warning>
+
+### Current Architecture
+
+- **Single Active Instance**: Only one S2 Lite pod can be active at a time
+- **Recreate Strategy**: Old pod terminates before new pod starts
+- **Fencing**: On startup, S2 Lite waits one manifest poll interval to ensure previous instance is fenced
+
+### Achieving High Availability
+
+1. **Fast Recovery**: Minimize downtime during pod restarts
+   ```yaml
+   resources:
+     requests:
+       cpu: 1000m  # Faster startup
+   
+   startupProbe:
+     initialDelaySeconds: 5
+     periodSeconds: 5  # Faster detection
+   ```
+
+2. **Multi-Region Deployments**: Run separate S2 Lite instances in different regions with different buckets
+
+3. **Client-Side Retry**: Configure SDKs with retry logic and failover
+
+### Planned Multi-Node Support
+
+Future versions may support horizontal scaling. Track progress:
+- [GitHub Issue #XX](https://github.com/s2-streamstore/s2) (hypothetical)
+
+## Resource Initialization
+
+### Declarative Basin/Stream Creation
+
+Create basins and streams automatically on startup:
+
+<Steps>
+  <Step title="Create init spec file">
+    ```json
+    {
+      "basins": [
+        {
+          "name": "production",
+          "config": {
+            "create_stream_on_append": true,
+            "create_stream_on_read": false,
+            "default_stream_config": {
+              "storage_class": "standard",
+              "retention_policy": "7days",
+              "timestamping": {
+                "mode": "client-prefer",
+                "uncapped": false
+              },
+              "delete_on_empty": {
+                "min_age": "1day"
+              }
+            }
+          },
+          "streams": [
+            {
+              "name": "events",
+              "config": {
+                "retention_policy": "infinite"
+              }
+            },
+            {
+              "name": "logs",
+              "config": {
+                "retention_policy": "3days"
+              }
+            }
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Create ConfigMap">
+    ```bash
+    kubectl create configmap s2-lite-init \
+      --from-file=init.json \
+      -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Mount in Helm values">
+    ```yaml
+    env:
+      - name: S2LITE_INIT_FILE
+        value: /etc/s2/init.json
+    
+    volumeMounts:
+      - name: init-config
+        mountPath: /etc/s2
+    
+    volumes:
+      - name: init-config
+        configMap:
+          name: s2-lite-init
+    ```
+  </Step>
+</Steps>
+
+## Security Best Practices
+
+### Pod Security
+
+The default Helm chart includes security hardening:
+
+```yaml
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532  # nonroot user
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+```
+
+### Network Policies
+
+Restrict network access:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: s2-lite-policy
+  namespace: s2-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: s2-lite
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: application
+    ports:
+    - protocol: TCP
+      port: 443
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # S3 API
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 53  # DNS
+```
+
+### CORS Configuration
+
+Disable permissive CORS in production:
+
+```yaml
+env:
+  - name: S2LITE_NO_CORS
+    value: "true"
+```
+
+Or use `--no-cors` flag.
+
+## Upgrading
+
+<Steps>
+  <Step title="Check release notes">
+    Review [CHANGELOG](https://github.com/s2-streamstore/s2/blob/main/lite/CHANGELOG.md) for breaking changes.
+  </Step>
+  
+  <Step title="Update Helm repository">
+    ```bash
+    helm repo update
+    ```
+  </Step>
+  
+  <Step title="Upgrade release">
+    ```bash
+    helm upgrade my-s2-lite s2/s2-lite-helm \
+      -f values.yaml \
+      -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Verify deployment">
+    ```bash
+    kubectl rollout status deployment/my-s2-lite -n s2-system
+    kubectl get pods -n s2-system
+    ```
+  </Step>
+</Steps>
+
+### Pinning Versions
+
+Pin to specific chart and app versions in production:
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm \
+  --version 0.1.8 \
+  --set image.tag=0.29.17 \
+  -f values.yaml
+```
+
+## Troubleshooting
+
+### Check Logs
+
+```bash
+kubectl logs -f deployment/my-s2-lite -n s2-system
+```
+
+### Common Issues
+
+<AccordionGroup>
+  <Accordion title="Pod stuck in Pending">
+    Check events:
+    ```bash
+    kubectl describe pod -l app.kubernetes.io/name=s2-lite -n s2-system
+    ```
+    
+    Common causes:
+    - Insufficient resources
+    - Node selector mismatch
+    - Missing service account
+  </Accordion>
+  
+  <Accordion title="Pod crash loops">
+    Check object storage permissions:
+    ```bash
+    kubectl logs deployment/my-s2-lite -n s2-system --previous
+    ```
+    
+    Verify:
+    - Bucket exists
+    - IAM role has correct permissions
+    - Endpoint URL is correct
+  </Accordion>
+  
+  <Accordion title="Health check failures">
+    Increase startup time:
+    ```yaml
+    startupProbe:
+      initialDelaySeconds: 30
+      failureThreshold: 60
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Backup & Restore" icon="shield" href="/guides/self-hosting/backup-restore">
+    Learn backup strategies for disaster recovery
+  </Card>
+  
+  <Card title="S3 Setup" icon="database" href="/guides/self-hosting/s3-setup">
+    Configure different object storage providers
+  </Card>
+</CardGroup>

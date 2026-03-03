@@ -1,0 +1,275 @@
+---
+title: 'Read Records'
+description: 'Read a batch of records from a stream'
+---
+
+## GET /streams/{stream}/records
+
+Read records from a stream with flexible positioning and filtering options. This endpoint supports both unary (request-response) and streaming modes.
+
+### Authentication
+
+Requires a valid access token with read permissions to the stream.
+
+### Path Parameters
+
+<ParamField path="stream" type="string" required>
+  Stream name to read records from.
+</ParamField>
+
+### Headers
+
+<ParamField header="S2-Basin" type="string" required>
+  Basin name where the stream resides.
+</ParamField>
+
+<ParamField header="S2-Format" type="string" default="base64">
+  Encoding format for record headers and body in the response:
+  - `base64` - Base64-encoded binary data (default)
+  - `utf8` - UTF-8 text
+</ParamField>
+
+<ParamField header="Accept" type="string" default="application/json">
+  Response format:
+  - `application/json` - JSON response (unary read)
+  - `application/protobuf` - Protobuf response (unary read)
+  - `text/event-stream` - Server-Sent Events streaming
+  - `s2s/proto` - S2S streaming protocol
+</ParamField>
+
+<ParamField header="Last-Event-ID" type="string">
+  For SSE reconnection. Format: `{seq_num}:{count}:{bytes}`
+  
+  Automatically resume from the last received record.
+</ParamField>
+
+### Query Parameters - Start Position
+
+Specify exactly one of these to set the starting position:
+
+<ParamField query="seq_num" type="uint64">
+  Start reading from this sequence number (inclusive).
+</ParamField>
+
+<ParamField query="timestamp" type="uint64">
+  Start reading from this timestamp in milliseconds since Unix epoch (inclusive).
+</ParamField>
+
+<ParamField query="tail_offset" type="uint64" default="0">
+  Start reading from N records before the current tail. Default is 0 (start from tail).
+</ParamField>
+
+<ParamField query="clamp" type="boolean" default="false">
+  If true and the requested position is beyond the tail, start from the tail instead of returning `416 Range Not Satisfiable`.
+</ParamField>
+
+### Query Parameters - End Conditions
+
+<ParamField query="count" type="uint64">
+  Maximum number of records to return. 
+  
+  Unary reads are capped at 1000 records (default). Streaming reads have no default limit.
+</ParamField>
+
+<ParamField query="bytes" type="uint64">
+  Maximum metered bytes to return.
+  
+  Unary reads are capped at 1 MiB (default). Streaming reads have no default limit.
+</ParamField>
+
+<ParamField query="until" type="uint64">
+  Exclusive timestamp to read until. Stop when encountering a record with timestamp >= this value.
+</ParamField>
+
+<ParamField query="wait" type="uint32">
+  Duration in seconds to wait for new records.
+  
+  - For unary reads: Maximum 60 seconds. Default is 0 if count/bytes/until are specified.
+  - For streaming reads: Idle timeout between records. Default is infinite.
+</ParamField>
+
+### Response
+
+<ResponseField name="records" type="array" required>
+  Array of sequenced records retrieved from the stream.
+  
+  For unary reads, can be empty if the request cannot be satisfied without violating explicit bounds.
+  
+  <Expandable title="SequencedRecord fields">
+    <ResponseField name="seq_num" type="uint64">
+      Sequence number assigned by the service.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp in milliseconds since Unix epoch.
+    </ResponseField>
+    
+    <ResponseField name="headers" type="array">
+      Array of name-value pairs encoded according to `S2-Format`.
+      
+      Each header is a two-element array: `["name", "value"]`
+    </ResponseField>
+    
+    <ResponseField name="body" type="string">
+      Record body encoded according to `S2-Format`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tail" type="object">
+  Present when reading recent records near the tail.
+  
+  <Expandable title="StreamPosition fields">
+    <ResponseField name="seq_num" type="uint64">
+      Next sequence number to be assigned.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp of the last record on the stream.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Status Codes
+
+- `200 OK` - Records successfully retrieved
+- `400 Bad Request` - Invalid query parameters
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Stream does not exist
+- `416 Range Not Satisfiable` - Requested position is beyond the tail (returns tail position in response)
+- `408 Request Timeout` - Operation timed out
+- `409 Conflict` - Stream is being deleted
+
+## Examples
+
+### Read from the beginning
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?seq_num=0&count=100" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "S2-Format: utf8"
+```
+
+### Response
+
+```json
+{
+  "records": [
+    {
+      "seq_num": 0,
+      "timestamp": 1709481234567,
+      "headers": [["source", "api"]],
+      "body": "First event"
+    },
+    {
+      "seq_num": 1,
+      "timestamp": 1709481234568,
+      "headers": [],
+      "body": "Second event"
+    }
+  ],
+  "tail": {
+    "seq_num": 100,
+    "timestamp": 1709481250000
+  }
+}
+```
+
+### Read from tail
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?tail_offset=0&count=10" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+### Read last 100 records
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/logs/records?tail_offset=100&count=100" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+### Read from timestamp
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?timestamp=1709481234567&count=50" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+### Read with time range
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?timestamp=1709481234000&until=1709481235000" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+### Long polling (wait for new records)
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?tail_offset=0&count=10&wait=30" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+This will wait up to 30 seconds for records to arrive if the stream is currently empty or at tail.
+
+### Clamped read
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?seq_num=999999&clamp=true&count=10" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+If seq_num 999999 is beyond the tail, this will start reading from the tail instead of returning an error.
+
+### Handle range not satisfiable
+
+```bash
+curl -X GET "https://mybasin.b.aws.s2.dev/v1/streams/events/records?seq_num=999999" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin"
+```
+
+If the requested position is beyond the tail:
+
+```json
+// 416 Range Not Satisfiable
+{
+  "tail": {
+    "seq_num": 100,
+    "timestamp": 1709481250000
+  }
+}
+```
+
+## Unary vs Streaming
+
+### Unary Read
+
+Default mode when Accept header is `application/json` or `application/protobuf`:
+- Returns a single batch of records
+- Limited to 1000 records and 1 MiB
+- Suitable for pagination and bounded queries
+- Supports long polling with `wait` parameter
+
+### Streaming Read
+
+Use Accept header `text/event-stream` or `s2s/proto`:
+- Continuously streams records as they arrive
+- No default limits on count or bytes
+- Ideal for tailing streams and real-time processing
+- See [Read Session](/api/records/read-session) for details
+
+## Notes
+
+- If no start position is specified, defaults to `tail_offset=0` (start from tail)
+- Records are always returned in sequence number order
+- The `tail` field is only included when reading near the current tail
+- Empty result with `tail` indicates you've caught up to the stream
+- Metered bytes count towards billing and include record headers and bodies

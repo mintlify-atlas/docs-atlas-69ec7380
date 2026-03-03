@@ -1,0 +1,75 @@
+---
+title: List Basins
+api: GET /basins
+---
+
+List basins in your account.
+
+## Query Parameters
+
+<ParamField query="prefix" type="string">
+  Filter to basins whose names begin with this prefix.
+</ParamField>
+
+<ParamField query="start_after" type="string">
+  Filter to basins whose names lexicographically start after this string.
+  It must be greater than or equal to the `prefix` if specified.
+</ParamField>
+
+<ParamField query="limit" type="number" default="1000">
+  Number of results, up to a maximum of 1000.
+</ParamField>
+
+## Response
+
+<ResponseField name="basins" type="array">
+  Matching basins (up to 1000 items).
+  
+  <Expandable title="BasinInfo">
+    <ResponseField name="name" type="string">
+      Basin name.
+    </ResponseField>
+    
+    <ResponseField name="scope" type="string">
+      Basin scope. Possible values: `aws:us-east-1`
+    </ResponseField>
+    
+    <ResponseField name="state" type="string">
+      Basin state. Possible values:
+      - `active` - Basin is active
+      - `creating` - Basin is being created
+      - `deleting` - Basin is being deleted
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean">
+  Indicates that there are more basins that match the criteria.
+</ResponseField>
+
+## Example
+
+```bash
+curl -X GET "https://aws.s2.dev/v1/basins?limit=10" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Response
+
+```json
+{
+  "basins": [
+    {
+      "name": "my-basin-1",
+      "scope": "aws:us-east-1",
+      "state": "active"
+    },
+    {
+      "name": "my-basin-2",
+      "scope": "aws:us-east-1",
+      "state": "active"
+    }
+  ],
+  "has_more": false
+}
+```

@@ -1,0 +1,406 @@
+---
+title: Deployment Guide
+description: Deploy S2 Lite to production environments
+---
+
+S2 Lite can be deployed in various environments, from Docker containers to Kubernetes clusters. This guide covers deployment best practices and options.
+
+## Deployment Modes
+
+<CardGroup cols={3}>
+  <Card title="Docker" icon="docker">
+    Single container deployment
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra">
+    Scalable cluster deployment
+  </Card>
+  <Card title="Bare Metal" icon="server">
+    Direct binary deployment
+  </Card>
+</CardGroup>
+
+## Docker Deployment
+
+### Basic Container
+
+The official S2 Lite Docker image is based on distroless and runs as a non-root user (UID 65532).
+
+```bash
+docker run -d \
+  --name s2-lite \
+  -p 8080:80 \
+  -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+  -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+  -e AWS_REGION="us-east-1" \
+  ghcr.io/s2-streamstore/s2:latest lite \
+  --bucket my-s2-bucket \
+  --path s2lite
+```
+
+### Docker Compose
+
+Create a `docker-compose.yml`:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  s2-lite:
+    image: ghcr.io/s2-streamstore/s2:latest
+    container_name: s2-lite
+    command:
+      - lite
+      - --bucket
+      - my-s2-bucket
+      - --path
+      - s2lite
+    ports:
+      - "8080:80"
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=us-east-1
+      # SlateDB settings
+      - SL8_FLUSH_INTERVAL=50ms
+      # Enable pipelining for better performance
+      - S2LITE_PIPELINE=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+```
+
+Start the service:
+
+```bash
+docker-compose up -d
+```
+
+### With TLS
+
+For production deployments, enable TLS:
+
+<CodeGroup>
+```bash Self-Signed Certificate
+docker run -d \
+  --name s2-lite \
+  -p 8443:443 \
+  ghcr.io/s2-streamstore/s2:latest lite \
+  --tls-self \
+  --bucket my-s2-bucket
+```
+
+```bash Provided Certificate
+docker run -d \
+  --name s2-lite \
+  -p 8443:443 \
+  -v /path/to/certs:/certs:ro \
+  ghcr.io/s2-streamstore/s2:latest lite \
+  --tls-cert /certs/tls.crt \
+  --tls-key /certs/tls.key \
+  --bucket my-s2-bucket
+```
+</CodeGroup>
+
+<Note>
+When TLS is enabled, the default port changes from 80 to 443. Use `--port` to override.
+</Note>
+
+### With Init File
+
+Mount an init file to pre-create basins and streams:
+
+```bash
+docker run -d \
+  --name s2-lite \
+  -p 8080:80 \
+  -v $(pwd)/resources.json:/config/resources.json:ro \
+  -e S2LITE_INIT_FILE=/config/resources.json \
+  ghcr.io/s2-streamstore/s2:latest lite \
+  --bucket my-s2-bucket
+```
+
+## Bare Metal Deployment
+
+### Binary Installation
+
+<Steps>
+  <Step title="Download the binary">
+    ```bash
+    # Using the install script
+    curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+
+    # Or manually download from releases
+    wget https://github.com/s2-streamstore/s2/releases/download/v0.29.18/s2-x86_64-unknown-linux-gnu.tar.gz
+    tar -xzf s2-x86_64-unknown-linux-gnu.tar.gz
+    sudo mv s2 /usr/local/bin/
+    ```
+  </Step>
+
+  <Step title="Create a systemd service">
+    Create `/etc/systemd/system/s2-lite.service`:
+
+    ```ini /etc/systemd/system/s2-lite.service
+    [Unit]
+    Description=S2 Lite Server
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=s2
+    Group=s2
+    WorkingDirectory=/var/lib/s2-lite
+    
+    # Environment variables
+    Environment="AWS_REGION=us-east-1"
+    Environment="SL8_FLUSH_INTERVAL=50ms"
+    Environment="S2LITE_PIPELINE=true"
+    EnvironmentFile=-/etc/s2-lite/config.env
+    
+    # Command
+    ExecStart=/usr/local/bin/s2 lite \
+      --bucket my-s2-bucket \
+      --path s2lite \
+      --port 8080 \
+      --init-file /etc/s2-lite/resources.json
+    
+    # Restart policy
+    Restart=always
+    RestartSec=10s
+    
+    # Security
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    ReadWritePaths=/var/lib/s2-lite
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  </Step>
+
+  <Step title="Create user and directories">
+    ```bash
+    # Create user
+    sudo useradd -r -s /bin/false s2
+
+    # Create directories
+    sudo mkdir -p /var/lib/s2-lite /etc/s2-lite
+    sudo chown s2:s2 /var/lib/s2-lite
+    ```
+  </Step>
+
+  <Step title="Configure AWS credentials">
+    Create `/etc/s2-lite/config.env`:
+
+    ```bash /etc/s2-lite/config.env
+    AWS_ACCESS_KEY_ID=your-access-key-id
+    AWS_SECRET_ACCESS_KEY=your-secret-access-key
+    AWS_REGION=us-east-1
+    ```
+
+    Secure the file:
+    ```bash
+    sudo chmod 600 /etc/s2-lite/config.env
+    sudo chown s2:s2 /etc/s2-lite/config.env
+    ```
+  </Step>
+
+  <Step title="Start the service">
+    ```bash
+    # Reload systemd
+    sudo systemctl daemon-reload
+
+    # Enable on boot
+    sudo systemctl enable s2-lite
+
+    # Start the service
+    sudo systemctl start s2-lite
+
+    # Check status
+    sudo systemctl status s2-lite
+
+    # View logs
+    sudo journalctl -u s2-lite -f
+    ```
+  </Step>
+</Steps>
+
+## Cloud Provider Specific
+
+### AWS with IAM Role
+
+When running on EC2 or ECS, use IAM roles instead of static credentials.
+
+<Steps>
+  <Step title="Create IAM policy">
+    Create a policy with S3 access:
+
+    ```json s2-lite-policy.json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::my-s2-bucket",
+            "arn:aws:s3:::my-s2-bucket/*"
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Attach to IAM role">
+    Attach the policy to your EC2 instance profile or ECS task role.
+  </Step>
+
+  <Step title="Run without credentials">
+    S2 Lite will automatically use the IAM role:
+
+    ```bash
+    s2 lite --bucket my-s2-bucket
+    ```
+
+    No `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` needed!
+  </Step>
+</Steps>
+
+### AWS with S3 Express One Zone
+
+For ultra-low latency, use S3 Express:
+
+```bash
+s2 lite \
+  --bucket my-express-bucket--use1-az1--x-s3 \
+  --path s2lite
+```
+
+<Note>
+S2 Lite automatically detects and uses the appropriate S3 endpoint for Express One Zone buckets.
+</Note>
+
+## Scaling Considerations
+
+### Single Instance
+
+<Warning>
+S2 Lite is designed as a **single-instance** deployment. Only one instance should write to a given bucket path at a time.
+</Warning>
+
+S2 Lite uses SlateDB, which relies on object storage for coordination. Running multiple instances against the same bucket path will cause data corruption.
+
+### Fencing
+
+When restarting S2 Lite, it waits for the manifest poll interval (default from SlateDB settings) to ensure the previous instance is fenced out:
+
+```
+sleeping to ensure prior instance fenced out manifest_poll_interval=...
+```
+
+This prevents split-brain scenarios.
+
+### High Availability
+
+For high availability:
+
+1. **Use Kubernetes** with a single replica and proper health checks
+2. **Use a process manager** like systemd with automatic restart
+3. **Monitor health endpoint** (`/health`) and restart on failure
+4. **Keep restart delays** to allow proper fencing
+
+<Note>
+S2 Lite's design prioritizes consistency over availability. A brief downtime during restarts is expected and safe.
+</Note>
+
+## Health Checks
+
+S2 Lite exposes a `/health` endpoint for health monitoring:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Returns:
+- `200 OK` with body `"OK"` when healthy
+- `503 Service Unavailable` when the database status check fails
+
+### Health Check Configuration
+
+**Docker:**
+```yaml
+healthcheck:
+  test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+```
+
+**Kubernetes:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+## Security
+
+### Running as Non-Root
+
+The Docker image runs as user `65532` (nonroot). For bare metal:
+
+```bash
+# Create dedicated user
+sudo useradd -r -s /bin/false s2
+
+# Run as that user
+sudo -u s2 s2 lite --port 8080
+```
+
+### TLS Best Practices
+
+1. **Use valid certificates** from Let's Encrypt or your CA
+2. **Rotate certificates** regularly
+3. **Disable CORS** in production with `--no-cors`
+4. **Use a reverse proxy** (nginx, Traefik) for advanced TLS configuration
+
+### Network Security
+
+1. **Firewall rules**: Restrict access to trusted networks
+2. **VPC/Security Groups**: Use cloud network security features
+3. **Private networks**: Deploy in private subnets with load balancer
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes" icon="dharmachakra" href="/lite/kubernetes">
+    Deploy with Helm to Kubernetes
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/lite/monitoring">
+    Set up Prometheus monitoring
+  </Card>
+  <Card title="Configuration" icon="gear" href="/lite/configuration">
+    Detailed configuration reference
+  </Card>
+</CardGroup>

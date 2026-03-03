@@ -1,0 +1,129 @@
+---
+title: Create Basin
+api: POST /basins
+---
+
+Create a new basin with a globally unique name.
+
+## Headers
+
+<ParamField header="s2-request-token" type="string">
+  Client-specified request token for idempotent retries.
+</ParamField>
+
+## Body Parameters
+
+<ParamField body="basin" type="string" required>
+  Basin name which must be globally unique.
+  It can be between 8 and 48 bytes in length, and comprise lowercase letters, numbers and hyphens.
+  It cannot begin or end with a hyphen.
+</ParamField>
+
+<ParamField body="config" type="object">
+  Basin configuration.
+  
+  <Expandable title="BasinConfig">
+    <ParamField body="default_stream_config" type="object">
+      Default stream configuration.
+      
+      <Expandable title="StreamConfig">
+        <ParamField body="storage_class" type="string">
+          Storage class for recent writes.
+          - `standard` - Append tail latency under 400 milliseconds
+          - `express` - Append tail latency under 40 milliseconds
+        </ParamField>
+        
+        <ParamField body="retention_policy" type="object">
+          Retention policy for the stream. Defaults to 7 days if unspecified.
+          - `{"age": <seconds>}` - Age in seconds (must be > 0)
+          - `{"infinite": {}}` - Retain records unless explicitly trimmed
+        </ParamField>
+        
+        <ParamField body="timestamping" type="object">
+          Timestamping behavior.
+          
+          <Expandable title="TimestampingConfig">
+            <ParamField body="mode" type="string">
+              Timestamping mode:
+              - `client-prefer` - Prefer client-specified timestamp if present otherwise use arrival time (default)
+              - `client-require` - Require a client-specified timestamp
+              - `arrival` - Use arrival time and ignore client-specified timestamp
+            </ParamField>
+            
+            <ParamField body="uncapped" type="boolean">
+              Allow client-specified timestamps to exceed the arrival time.
+              If false or not set, client timestamps will be capped at the arrival time.
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField body="delete_on_empty" type="object">
+          Delete-on-empty configuration.
+          
+          <Expandable title="DeleteOnEmptyConfig">
+            <ParamField body="min_age_secs" type="number" default="0">
+              Minimum age in seconds before an empty stream can be deleted.
+              Set to 0 (default) to disable delete-on-empty.
+            </ParamField>
+          </Expandable>
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField body="create_stream_on_append" type="boolean" default="false">
+      Create stream on append if it doesn't exist, using the default stream configuration.
+    </ParamField>
+    
+    <ParamField body="create_stream_on_read" type="boolean" default="false">
+      Create stream on read if it doesn't exist, using the default stream configuration.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="scope" type="string">
+  Basin scope. This cannot be reconfigured after creation.
+  Possible values: `aws:us-east-1`
+</ParamField>
+
+## Response
+
+<ResponseField name="name" type="string">
+  Basin name.
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  Basin scope.
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  Basin state.
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST "https://aws.s2.dev/v1/basins" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "basin": "my-new-basin",
+    "config": {
+      "default_stream_config": {
+        "storage_class": "standard",
+        "retention_policy": {"age": 604800}
+      },
+      "create_stream_on_append": true
+    },
+    "scope": "aws:us-east-1"
+  }'
+```
+
+### Response (201 Created)
+
+```json
+{
+  "name": "my-new-basin",
+  "scope": "aws:us-east-1",
+  "state": "creating"
+}
+```

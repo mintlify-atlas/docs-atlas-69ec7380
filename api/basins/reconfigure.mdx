@@ -1,0 +1,147 @@
+---
+title: Reconfigure Basin
+api: PATCH /basins/{basin}
+---
+
+Reconfigure an existing basin. Only the specified fields will be updated.
+
+## Path Parameters
+
+<ParamField path="basin" type="string" required>
+  Basin name.
+</ParamField>
+
+## Body Parameters
+
+<ParamField body="default_stream_config" type="object">
+  Basin configuration to update.
+  
+  <Expandable title="StreamReconfiguration">
+    <ParamField body="storage_class" type="string">
+      Storage class for recent writes.
+      - `standard` - Append tail latency under 400 milliseconds
+      - `express` - Append tail latency under 40 milliseconds
+      
+      Set to `null` to clear this field.
+    </ParamField>
+    
+    <ParamField body="retention_policy" type="object">
+      Retention policy for the stream.
+      - `{"age": <seconds>}` - Age in seconds (must be > 0)
+      - `{"infinite": {}}` - Retain records unless explicitly trimmed
+      
+      Set to `null` to clear this field and use default (7 days).
+    </ParamField>
+    
+    <ParamField body="timestamping" type="object">
+      Timestamping behavior to update.
+      
+      <Expandable title="TimestampingReconfiguration">
+        <ParamField body="mode" type="string">
+          Timestamping mode:
+          - `client-prefer` - Prefer client-specified timestamp if present
+          - `client-require` - Require a client-specified timestamp
+          - `arrival` - Use arrival time and ignore client-specified timestamp
+          
+          Set to `null` to clear this field.
+        </ParamField>
+        
+        <ParamField body="uncapped" type="boolean">
+          Allow client-specified timestamps to exceed the arrival time.
+          
+          Set to `null` to clear this field.
+        </ParamField>
+      </Expandable>
+      
+      Set the entire `timestamping` object to `null` to clear all timestamping configuration.
+    </ParamField>
+    
+    <ParamField body="delete_on_empty" type="object">
+      Delete-on-empty configuration to update.
+      
+      <Expandable title="DeleteOnEmptyReconfiguration">
+        <ParamField body="min_age_secs" type="number">
+          Minimum age in seconds before an empty stream can be deleted.
+          Set to 0 to disable delete-on-empty.
+          
+          Set to `null` to clear this field.
+        </ParamField>
+      </Expandable>
+      
+      Set the entire `delete_on_empty` object to `null` to clear all delete-on-empty configuration.
+    </ParamField>
+  </Expandable>
+  
+  Set to `null` to clear the entire default stream configuration.
+</ParamField>
+
+<ParamField body="create_stream_on_append" type="boolean">
+  Create a stream on append if it doesn't exist.
+</ParamField>
+
+<ParamField body="create_stream_on_read" type="boolean">
+  Create a stream on read if it doesn't exist.
+</ParamField>
+
+## Response
+
+Returns the updated basin configuration with the same structure as [Get Basin Config](/api/basins/get-config).
+
+<ResponseField name="default_stream_config" type="object">
+  Default stream configuration.
+</ResponseField>
+
+<ResponseField name="create_stream_on_append" type="boolean">
+  Create stream on append if it doesn't exist.
+</ResponseField>
+
+<ResponseField name="create_stream_on_read" type="boolean">
+  Create stream on read if it doesn't exist.
+</ResponseField>
+
+## Example
+
+```bash
+curl -X PATCH "https://aws.s2.dev/v1/basins/my-basin" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "default_stream_config": {
+      "retention_policy": {"age": 2592000}
+    },
+    "create_stream_on_append": true
+  }'
+```
+
+### Response
+
+```json
+{
+  "default_stream_config": {
+    "storage_class": "standard",
+    "retention_policy": {"age": 2592000},
+    "timestamping": {
+      "mode": "client-prefer",
+      "uncapped": false
+    },
+    "delete_on_empty": {
+      "min_age_secs": 0
+    }
+  },
+  "create_stream_on_append": true,
+  "create_stream_on_read": false
+}
+```
+
+## Notes
+
+- Only specified fields are updated; unspecified fields retain their current values
+- Setting a field to `null` clears it and restores the default value
+- Omitting a field leaves it unchanged
+
+## Error Responses
+
+- `404 Not Found` - Basin does not exist
+- `400 Bad Request` - Invalid basin name or configuration
+- `403 Forbidden` - Insufficient permissions
+- `408 Request Timeout` - Request timed out

@@ -1,0 +1,700 @@
+---
+title: Backup & Restore
+description: Strategies for backing up and restoring S2 Lite data
+---
+
+## Overview
+
+S2 Lite stores all data in object storage through SlateDB. This guide covers backup strategies, disaster recovery, and data migration approaches.
+
+## Understanding S2 Lite Storage
+
+### Storage Architecture
+
+S2 Lite uses [SlateDB](https://slatedb.io) which stores data entirely in object storage:
+
+```
+s3://bucket/path/
+├── manifest/          # Database manifest files
+├── wal/              # Write-ahead logs
+├── compacted/        # Compacted data files
+└── sst/              # Sorted string tables
+```
+
+All data is organized under the `--path` prefix you specify when running S2 Lite.
+
+### Data Model
+
+SlateDB organizes S2 data using these key prefixes:
+
+- **Basin metadata**: `/basin/{name}/meta`
+- **Stream metadata**: `/stream/{basin}/{stream}/meta`
+- **Stream records**: `/stream/{basin}/{stream}/records/{seq}`
+- **Stream tail positions**: `/stream/{basin}/{stream}/tail`
+- **Fencing tokens**: `/stream/{basin}/{stream}/fence`
+
+See `lite/src/backend/kv/mod.rs` for the complete data model.
+
+## Backup Strategies
+
+### Strategy 1: Object Storage Native Backups
+
+<Note>
+**Recommended for most deployments**. Leverage your object storage provider's built-in backup features.
+</Note>
+
+#### AWS S3 Versioning + Lifecycle
+
+<Steps>
+  <Step title="Enable S3 versioning">
+    ```bash
+    aws s3api put-bucket-versioning \
+      --bucket my-s2-bucket \
+      --versioning-configuration Status=Enabled
+    ```
+    
+    This preserves all versions of objects, protecting against accidental deletions.
+  </Step>
+  
+  <Step title="Configure lifecycle policy">
+    ```json
+    {
+      "Rules": [
+        {
+          "Id": "ArchiveOldVersions",
+          "Status": "Enabled",
+          "NoncurrentVersionTransitions": [
+            {
+              "NoncurrentDays": 30,
+              "StorageClass": "GLACIER_IR"
+            },
+            {
+              "NoncurrentDays": 90,
+              "StorageClass": "DEEP_ARCHIVE"
+            }
+          ],
+          "NoncurrentVersionExpiration": {
+            "NoncurrentDays": 365
+          }
+        }
+      ]
+    }
+    ```
+    
+    ```bash
+    aws s3api put-bucket-lifecycle-configuration \
+      --bucket my-s2-bucket \
+      --lifecycle-configuration file://lifecycle.json
+    ```
+  </Step>
+  
+  <Step title="Test recovery">
+    List object versions:
+    ```bash
+    aws s3api list-object-versions \
+      --bucket my-s2-bucket \
+      --prefix s2lite/
+    ```
+    
+    Restore a specific version:
+    ```bash
+    aws s3api copy-object \
+      --bucket my-s2-bucket \
+      --copy-source my-s2-bucket/s2lite/manifest/MANIFEST-00001 \
+      --key s2lite/manifest/MANIFEST-00001 \
+      --version-id VERSION_ID
+    ```
+  </Step>
+</Steps>
+
+#### S3 Replication (Cross-Region)
+
+<Steps>
+  <Step title="Create destination bucket">
+    ```bash
+    aws s3 mb s3://my-s2-backup-bucket --region us-west-2
+    aws s3api put-bucket-versioning \
+      --bucket my-s2-backup-bucket \
+      --versioning-configuration Status=Enabled
+    ```
+  </Step>
+  
+  <Step title="Create replication IAM role">
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetReplicationConfiguration",
+            "s3:ListBucket"
+          ],
+          "Resource": "arn:aws:s3:::my-s2-bucket"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObjectVersionForReplication",
+            "s3:GetObjectVersionAcl"
+          ],
+          "Resource": "arn:aws:s3:::my-s2-bucket/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:ReplicateObject",
+            "s3:ReplicateDelete"
+          ],
+          "Resource": "arn:aws:s3:::my-s2-backup-bucket/*"
+        }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure replication">
+    ```json
+    {
+      "Role": "arn:aws:iam::ACCOUNT:role/S2ReplicationRole",
+      "Rules": [
+        {
+          "Status": "Enabled",
+          "Priority": 1,
+          "Filter": {
+            "Prefix": "s2lite/"
+          },
+          "Destination": {
+            "Bucket": "arn:aws:s3:::my-s2-backup-bucket",
+            "ReplicationTime": {
+              "Status": "Enabled",
+              "Time": {
+                "Minutes": 15
+              }
+            },
+            "Metrics": {
+              "Status": "Enabled"
+            }
+          },
+          "DeleteMarkerReplication": {
+            "Status": "Enabled"
+          }
+        }
+      ]
+    }
+    ```
+    
+    ```bash
+    aws s3api put-bucket-replication \
+      --bucket my-s2-bucket \
+      --replication-configuration file://replication.json
+    ```
+  </Step>
+</Steps>
+
+#### Cloudflare R2 Replication
+
+Cloudflare R2 doesn't support automatic replication yet, but you can use object lifecycle policies:
+
+```bash
+# Create backup using rclone
+rclone sync r2:my-s2-bucket/s2lite r2:my-s2-backup/s2lite
+```
+
+#### Tigris Automatic Backups
+
+Tigris provides automatic multi-region replication and point-in-time recovery. No additional configuration needed.
+
+### Strategy 2: Snapshot-Based Backups
+
+Create point-in-time snapshots by copying the entire S2 Lite path:
+
+<Steps>
+  <Step title="Create snapshot script">
+    ```bash
+    #!/bin/bash
+    # s2-backup.sh
+    
+    BUCKET="my-s2-bucket"
+    SOURCE_PATH="s2lite"
+    BACKUP_PATH="backups/s2lite-$(date +%Y%m%d-%H%M%S)"
+    
+    echo "Creating snapshot: s3://${BUCKET}/${BACKUP_PATH}"
+    
+    aws s3 sync \
+      s3://${BUCKET}/${SOURCE_PATH}/ \
+      s3://${BUCKET}/${BACKUP_PATH}/ \
+      --storage-class GLACIER_IR
+    
+    echo "Snapshot complete"
+    ```
+  </Step>
+  
+  <Step title="Schedule with CronJob">
+    ```yaml
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: s2-lite-backup
+      namespace: s2-system
+    spec:
+      schedule: "0 2 * * *"  # 2 AM daily
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              serviceAccountName: s2-backup
+              containers:
+              - name: backup
+                image: amazon/aws-cli:latest
+                env:
+                - name: BUCKET
+                  value: my-s2-bucket
+                - name: SOURCE_PATH
+                  value: s2lite
+                command:
+                - /bin/bash
+                - -c
+                - |
+                  BACKUP_PATH="backups/s2lite-$(date +%Y%m%d-%H%M%S)"
+                  echo "Creating snapshot: s3://${BUCKET}/${BACKUP_PATH}"
+                  aws s3 sync \
+                    s3://${BUCKET}/${SOURCE_PATH}/ \
+                    s3://${BUCKET}/${BACKUP_PATH}/ \
+                    --storage-class GLACIER_IR
+                  echo "Snapshot complete"
+              restartPolicy: OnFailure
+    ```
+  </Step>
+  
+  <Step title="Create IAM role for backup job">
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:ListBucket",
+            "s3:GetObject",
+            "s3:PutObject"
+          ],
+          "Resource": [
+            "arn:aws:s3:::my-s2-bucket",
+            "arn:aws:s3:::my-s2-bucket/*"
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+</Steps>
+
+### Strategy 3: Stream-Level Backups
+
+Export individual streams to separate storage:
+
+<Steps>
+  <Step title="Export stream to file">
+    ```bash
+    # Export all records from a stream
+    s2 read s2://basin/stream --format jsonl > stream-backup.jsonl
+    
+    # Compress for storage
+    gzip stream-backup.jsonl
+    
+    # Upload to backup location
+    aws s3 cp stream-backup.jsonl.gz s3://backups/streams/
+    ```
+  </Step>
+  
+  <Step title="Automated export script">
+    ```bash
+    #!/bin/bash
+    # export-streams.sh
+    
+    BASIN="production"
+    BACKUP_BUCKET="s3://backup-bucket/streams"
+    DATE=$(date +%Y%m%d)
+    
+    # List all streams in basin
+    STREAMS=$(s2 list-streams ${BASIN} --format json | jq -r '.[]')
+    
+    for stream in $STREAMS; do
+      echo "Exporting ${BASIN}/${stream}..."
+      
+      s2 read s2://${BASIN}/${stream} --format jsonl | \
+        gzip > ${stream}-${DATE}.jsonl.gz
+      
+      aws s3 cp ${stream}-${DATE}.jsonl.gz \
+        ${BACKUP_BUCKET}/${BASIN}/${stream}/${DATE}/
+      
+      rm ${stream}-${DATE}.jsonl.gz
+    done
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Stream-level backups require reading all data through S2 Lite, which may impact performance and incur costs.
+</Warning>
+
+## Restore Procedures
+
+### Restore from Object Storage Backup
+
+#### Full Restore
+
+<Steps>
+  <Step title="Stop S2 Lite">
+    ```bash
+    kubectl scale deployment my-s2-lite --replicas=0 -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Restore from backup">
+    ```bash
+    # From S3 versioning
+    aws s3api list-object-versions \
+      --bucket my-s2-bucket \
+      --prefix s2lite/ \
+      --query 'Versions[?IsLatest==`false`]'
+    
+    # Restore specific version (if needed)
+    aws s3api copy-object \
+      --copy-source my-s2-bucket/s2lite/manifest/MANIFEST \
+      --bucket my-s2-bucket \
+      --key s2lite/manifest/MANIFEST \
+      --version-id VERSION_ID
+    
+    # Or restore from snapshot
+    aws s3 sync \
+      s3://my-s2-bucket/backups/s2lite-20260303-020000/ \
+      s3://my-s2-bucket/s2lite/ \
+      --delete
+    ```
+  </Step>
+  
+  <Step title="Start S2 Lite">
+    ```bash
+    kubectl scale deployment my-s2-lite --replicas=1 -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Verify data">
+    ```bash
+    # List basins
+    s2 list-basins
+    
+    # Check specific streams
+    s2 read s2://basin/stream --limit 10
+    ```
+  </Step>
+</Steps>
+
+#### Point-in-Time Recovery
+
+Recover to a specific point in time using S3 versioning:
+
+```bash
+# List versions with timestamps
+aws s3api list-object-versions \
+  --bucket my-s2-bucket \
+  --prefix s2lite/ \
+  --query 'Versions[?LastModified<=`2026-03-03T10:00:00.000Z`]' \
+  --output json > versions-to-restore.json
+
+# Restore each version
+cat versions-to-restore.json | jq -r '.[] | .VersionId + " " + .Key' | \
+while read version_id key; do
+  aws s3api copy-object \
+    --copy-source my-s2-bucket/${key}?versionId=${version_id} \
+    --bucket my-s2-bucket \
+    --key ${key}
+done
+```
+
+### Restore Individual Streams
+
+<Steps>
+  <Step title="Import stream from backup">
+    ```bash
+    # Download backup
+    aws s3 cp s3://backup-bucket/streams/basin/stream/20260303/stream.jsonl.gz .
+    gunzip stream.jsonl.gz
+    ```
+  </Step>
+  
+  <Step title="Create stream">
+    ```bash
+    s2 create-stream basin stream
+    ```
+  </Step>
+  
+  <Step title="Append records">
+    ```bash
+    cat stream.jsonl | s2 append s2://basin/stream
+    ```
+  </Step>
+</Steps>
+
+<Note>
+This restores data but not the original sequence numbers. Use object storage backups for exact recovery.
+</Note>
+
+### Cross-Region Failover
+
+Switch to a replica bucket in another region:
+
+<Steps>
+  <Step title="Update S2 Lite configuration">
+    ```yaml
+    # Updated values.yaml
+    objectStorage:
+      enabled: true
+      bucket: my-s2-backup-bucket  # Replica bucket
+      path: s2lite
+    
+    env:
+      - name: AWS_REGION
+        value: us-west-2  # Backup region
+    ```
+  </Step>
+  
+  <Step title="Upgrade deployment">
+    ```bash
+    helm upgrade my-s2-lite s2/s2-lite-helm \
+      -f values.yaml \
+      -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Verify failover">
+    ```bash
+    # Check health
+    kubectl get pods -n s2-system
+    curl http://s2-lite-endpoint/health
+    
+    # Verify data
+    s2 list-basins
+    ```
+  </Step>
+</Steps>
+
+## Data Migration
+
+### Migrate Between Object Stores
+
+Move S2 Lite data from one object storage provider to another:
+
+<Steps>
+  <Step title="Stop S2 Lite">
+    ```bash
+    kubectl scale deployment my-s2-lite --replicas=0 -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Copy data to new bucket">
+    ```bash
+    # S3 to S3 (different regions)
+    aws s3 sync \
+      s3://old-bucket/s2lite/ \
+      s3://new-bucket/s2lite/
+    
+    # S3 to R2 using rclone
+    rclone copy \
+      s3:old-bucket/s2lite \
+      r2:new-bucket/s2lite
+    
+    # S3 to Tigris
+    AWS_ENDPOINT_URL_S3=https://fly.storage.tigris.dev \
+    aws s3 sync \
+      s3://old-bucket/s2lite/ \
+      s3://tigris-bucket/s2lite/
+    ```
+  </Step>
+  
+  <Step title="Update S2 Lite configuration">
+    ```yaml
+    objectStorage:
+      enabled: true
+      bucket: new-bucket
+      path: s2lite
+      endpoint: https://new-endpoint  # If applicable
+    ```
+  </Step>
+  
+  <Step title="Start S2 Lite with new bucket">
+    ```bash
+    helm upgrade my-s2-lite s2/s2-lite-helm -f values.yaml -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Verify migration">
+    ```bash
+    s2 list-basins
+    s2 read s2://basin/stream --limit 10
+    ```
+  </Step>
+</Steps>
+
+### Blue-Green Migration
+
+Zero-downtime migration strategy:
+
+<Steps>
+  <Step title="Copy data to new bucket">
+    While S2 Lite is running:
+    ```bash
+    aws s3 sync s3://old-bucket/s2lite/ s3://new-bucket/s2lite/
+    ```
+  </Step>
+  
+  <Step title="Deploy new S2 Lite (green)">
+    ```bash
+    helm install s2-lite-green s2/s2-lite-helm \
+      --set objectStorage.bucket=new-bucket \
+      --set service.port=8081 \
+      -n s2-system
+    ```
+  </Step>
+  
+  <Step title="Switch traffic">
+    Update DNS or load balancer to point to green deployment.
+  </Step>
+  
+  <Step title="Cleanup old deployment">
+    ```bash
+    helm uninstall my-s2-lite -n s2-system
+    ```
+  </Step>
+</Steps>
+
+## Disaster Recovery Plan
+
+### RTO and RPO Targets
+
+| Strategy | RTO | RPO | Cost |
+|----------|-----|-----|------|
+| S3 Versioning | Minutes | Seconds | Low |
+| Cross-Region Replication | Minutes | 15 mins | Medium |
+| Snapshot Backups | Hours | 1 day | Low |
+| Stream Exports | Hours | 1 day | High |
+
+### DR Checklist
+
+<Steps>
+  <Step title="Document configuration">
+    - Record bucket names, regions, endpoints
+    - Save Helm values files in version control
+    - Document IAM roles and policies
+    - List all basins and critical streams
+  </Step>
+  
+  <Step title="Enable backups">
+    - Enable S3 versioning
+    - Configure lifecycle policies
+    - Set up cross-region replication (critical deployments)
+    - Schedule snapshot backups
+  </Step>
+  
+  <Step title="Test recovery procedures">
+    - Perform quarterly restore tests
+    - Validate backup integrity
+    - Measure actual RTO/RPO
+    - Update runbooks based on results
+  </Step>
+  
+  <Step title="Monitor backup status">
+    - Set up alerts for replication lag
+    - Monitor backup job failures
+    - Track backup storage costs
+  </Step>
+</Steps>
+
+### Emergency Recovery Runbook
+
+1. **Assess the situation**
+   - Identify scope of data loss
+   - Determine last known good state
+   - Choose recovery strategy
+
+2. **Stop S2 Lite**
+   ```bash
+   kubectl scale deployment my-s2-lite --replicas=0 -n s2-system
+   ```
+
+3. **Restore data** (choose one)
+   - S3 versioning: Restore specific versions
+   - Replication: Switch to replica bucket
+   - Snapshot: Sync from backup path
+
+4. **Restart S2 Lite**
+   ```bash
+   kubectl scale deployment my-s2-lite --replicas=1 -n s2-system
+   ```
+
+5. **Verify recovery**
+   - Check health endpoint
+   - List basins and streams
+   - Validate critical data
+   - Test write operations
+
+6. **Document incident**
+   - Record timeline
+   - Note data loss (if any)
+   - Update procedures
+
+## Cost Optimization
+
+### Storage Class Strategies
+
+```json
+{
+  "Rules": [
+    {
+      "Id": "TransitionOldData",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "s2lite/"
+      },
+      "Transitions": [
+        {
+          "Days": 30,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "Days": 90,
+          "StorageClass": "GLACIER_IR"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Backup Retention
+
+```bash
+# Delete old snapshots
+aws s3 ls s3://my-s2-bucket/backups/ | \
+while read -r line; do
+  backup_date=$(echo $line | awk '{print $2}' | cut -d'-' -f2)
+  if [[ $backup_date < $(date -d '90 days ago' +%Y%m%d) ]]; then
+    backup_path=$(echo $line | awk '{print $2}')
+    aws s3 rm s3://my-s2-bucket/backups/${backup_path}/ --recursive
+  fi
+done
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="rocket" href="/guides/self-hosting/production-deployment">
+    Review production deployment best practices
+  </Card>
+  
+  <Card title="S3 Setup" icon="database" href="/guides/self-hosting/s3-setup">
+    Configure object storage providers
+  </Card>
+</CardGroup>

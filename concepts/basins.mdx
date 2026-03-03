@@ -1,0 +1,278 @@
+---
+title: Basins
+description: Understanding basins as namespaces for organizing and configuring streams
+---
+
+Basins are the top-level organizational unit in S2. They serve as namespaces for streams and provide default configuration that applies to all streams within them.
+
+## What is a basin?
+
+A basin is a logical container that:
+
+- **Organizes streams**: Groups related streams together
+- **Provides defaults**: Sets default configuration for all streams
+- **Enables auto-creation**: Can automatically create streams on first append or read
+- **Scopes access**: Acts as a boundary for access control (in s2.dev)
+
+<Info>
+Think of a basin like a database or schema in traditional databases - it's a namespace that groups related data streams together.
+</Info>
+
+## Basin naming
+
+Basin names must follow specific rules:
+
+- **Length**: Between 8 and 48 bytes
+- **Characters**: Lowercase letters (`a-z`), numbers (`0-9`), and hyphens (`-`)
+- **Format**: Cannot begin or end with a hyphen
+- **Uniqueness**: Must be globally unique (in s2.dev) or per-instance (in s2-lite)
+
+### Valid examples
+
+```
+production-events
+user-analytics-2024
+iot-sensor-data
+```
+
+### Invalid examples
+
+```
+short           # Too short (< 8 characters)
+-starts-hyphen  # Begins with hyphen
+ends-hyphen-    # Ends with hyphen
+HasUpperCase    # Contains uppercase letters
+```
+
+## Basin configuration
+
+Basins can be configured with default settings that apply to all streams within them:
+
+```json
+{
+  "basin": "my-basin",
+  "config": {
+    "default_stream_config": {
+      "storage_class": "standard",
+      "retention_policy": {
+        "age": 604800
+      },
+      "timestamping": {
+        "mode": "client-prefer",
+        "uncapped": false
+      },
+      "delete_on_empty": {
+        "min_age_secs": 3600
+      }
+    },
+    "create_stream_on_append": true,
+    "create_stream_on_read": false
+  }
+}
+```
+
+### Configuration options
+
+#### Default stream configuration
+
+Sets defaults for all streams created in the basin:
+
+- **storage_class**: `standard` (400ms tail latency) or `express` (40ms tail latency)
+- **retention_policy**: How long to keep records before automatic trimming
+- **timestamping**: How timestamps are assigned to records
+- **delete_on_empty**: Automatically delete streams after they've been empty for a period
+
+<Note>
+Individual streams can override these defaults with their own configuration.
+</Note>
+
+#### Auto-creation flags
+
+**create_stream_on_append** (`boolean`, default: `false`)
+
+When enabled, appending to a non-existent stream automatically creates it:
+
+```bash
+# With auto-creation enabled
+curl -X POST https://api.s2.dev/streams/new-stream/records \
+  -H "S2-Basin: my-basin" \
+  -d '{"records": [{"body": "SGVsbG8="}]}'
+# Stream is created automatically
+```
+
+**create_stream_on_read** (`boolean`, default: `false`)
+
+When enabled, reading from a non-existent stream automatically creates it:
+
+```bash
+# With auto-creation enabled
+curl https://api.s2.dev/streams/new-stream/records \
+  -H "S2-Basin: my-basin"
+# Stream is created, returns empty result
+```
+
+<Tip>
+Auto-creation is useful for dynamic workloads where stream names aren't known in advance, such as per-user or per-device streams.
+</Tip>
+
+## Basin states
+
+Basins can be in one of three states:
+
+- **active**: Basin is operational and can be used
+- **creating**: Basin is being provisioned (s2.dev only)
+- **deleting**: Basin deletion is in progress
+
+## Basin scope
+
+In s2.dev, basins can be scoped to specific regions:
+
+- **aws:us-east-1**: AWS US East (N. Virginia) region
+
+The scope cannot be changed after creation and determines where data is stored.
+
+<Info>
+In s2-lite, basin scope is not applicable as it's a single-node deployment.
+</Info>
+
+## Operations
+
+### Creating a basin
+
+<CodeGroup>
+```bash CLI
+s2 create-basin my-basin \
+  --create-stream-on-append \
+  --create-stream-on-read
+```
+
+```bash cURL
+curl -X PUT https://api.s2.dev/basins/my-basin \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "create_stream_on_append": true,
+      "create_stream_on_read": true
+    }
+  }'
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::{CreateBasinInput, BasinConfig}};
+
+let s2 = S2::new(S2Config::new(access_token))?;
+let mut config = BasinConfig::default();
+config.create_stream_on_append = true;
+config.create_stream_on_read = true;
+
+let basin = s2.create_basin(
+    CreateBasinInput::new("my-basin".parse()?)
+        .config(config)
+).await?;
+```
+</CodeGroup>
+
+### Listing basins
+
+<CodeGroup>
+```bash CLI
+s2 list-basins --prefix prod-
+```
+
+```bash cURL
+curl https://api.s2.dev/basins?prefix=prod- \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}"
+```
+</CodeGroup>
+
+Response:
+```json
+{
+  "basins": [
+    {
+      "name": "prod-events",
+      "state": "active",
+      "scope": "aws:us-east-1"
+    },
+    {
+      "name": "prod-analytics",
+      "state": "active",
+      "scope": "aws:us-east-1"
+    }
+  ],
+  "has_more": false
+}
+```
+
+### Deleting a basin
+
+<Warning>
+Deleting a basin will delete all streams within it and their data. This operation cannot be undone.
+</Warning>
+
+<CodeGroup>
+```bash CLI
+s2 delete-basin my-basin
+```
+
+```bash cURL
+curl -X DELETE https://api.s2.dev/basins/my-basin \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}"
+```
+</CodeGroup>
+
+### Reconfiguring a basin
+
+You can update basin configuration after creation:
+
+```bash
+curl -X PUT https://api.s2.dev/basins/my-basin \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "create_stream_on_append": false
+    }
+  }'
+```
+
+## Implementation details
+
+In **s2-lite**, basins are stored as metadata in SlateDB:
+
+- **Key**: `BasinMeta(BasinName)` - Maps basin name to its metadata
+- **Value**: Basin configuration including default stream config and auto-creation flags
+- **Deletion**: `BasinDeletionPending(BasinName)` key tracks deletion progress
+
+From `/home/daytona/workspace/source/lite/src/backend/kv/mod.rs:59-66`:
+
+```rust
+/// (BM) per-basin, updatable
+/// Key: BasinName
+/// Value: BasinMeta
+BasinMeta(BasinName),
+/// (BDP) per-basin, deletable, only present while basin deletion pending
+/// Key: BasinName
+/// Value: StreamNameStartAfter (cursor for resumable deletion)
+BasinDeletionPending(BasinName),
+```
+
+## Best practices
+
+1. **Use descriptive names**: Choose basin names that clearly indicate their purpose
+2. **Group by lifecycle**: Put streams with similar retention needs in the same basin
+3. **Leverage auto-creation**: Enable for dynamic stream patterns, disable for strict schemas
+4. **Set appropriate defaults**: Configure sensible defaults to avoid per-stream configuration
+5. **Plan for deletion**: Remember that deleting a basin deletes all its streams
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Streams" icon="stream" href="/concepts/streams">
+    Learn about streams within basins
+  </Card>
+  <Card title="Stream configuration" icon="gear" href="/concepts/streams#configuration">
+    Understand stream-level configuration options
+  </Card>
+</CardGroup>

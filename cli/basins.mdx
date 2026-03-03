@@ -1,0 +1,268 @@
+---
+title: Basin management
+description: Create and manage basins using the S2 CLI
+---
+
+Basins are the top-level organizational unit in S2. Each basin contains streams and has configurable defaults for stream creation.
+
+## List basins
+
+List all basins in your account:
+
+```bash
+s2 list-basins
+```
+
+Output:
+```
+my-basin active
+prod-data active
+test-basin creating
+```
+
+### Filter by prefix
+
+```bash
+s2 list-basins --prefix "prod"
+```
+
+### Pagination
+
+Limit the number of results:
+
+```bash
+s2 list-basins --limit 50
+```
+
+Start after a specific basin name:
+
+```bash
+s2 list-basins --start-after "my-basin"
+```
+
+Disable auto-pagination to get a single page:
+
+```bash
+s2 list-basins --limit 100 --no-auto-paginate
+```
+
+### Using the ls shortcut
+
+The `ls` command lists basins when no argument is provided:
+
+```bash
+s2 ls
+```
+
+## Create a basin
+
+Create a new basin with default settings:
+
+```bash
+s2 create-basin my-basin
+```
+
+Output:
+```
+✓ Basin created
+```
+
+### Configure basin defaults
+
+Set default stream configuration for auto-created streams:
+
+```bash
+s2 create-basin my-basin \
+  --storage-class express \
+  --retention-policy 7d \
+  --timestamping-mode client-require
+```
+
+### Enable stream auto-creation
+
+Allow streams to be created automatically on append or read:
+
+```bash
+s2 create-basin my-basin \
+  --create-stream-on-append \
+  --create-stream-on-read
+```
+
+With these flags enabled, appending to a non-existent stream will create it with basin defaults instead of returning an error.
+
+## Get basin configuration
+
+View the current configuration of a basin:
+
+```bash
+s2 get-basin-config my-basin
+```
+
+Output (table format):
+```
+┌───────────────────────────────┬─────────────────────────┐
+│ default_stream_config         │                         │
+├───────────────────────────────┼─────────────────────────┤
+│   storage_class               │ express                 │
+│   retention_policy            │ 604800                  │
+│   timestamping                │ ...                     │
+│ create_stream_on_append       │ true                    │
+│ create_stream_on_read         │ false                   │
+└───────────────────────────────┴─────────────────────────┘
+```
+
+## Reconfigure a basin
+
+Update an existing basin's configuration:
+
+```bash
+s2 reconfigure-basin my-basin \
+  --create-stream-on-append true \
+  --storage-class standard
+```
+
+Output:
+```
+✓ Basin reconfigured
+```
+
+Only the specified fields are updated; other settings remain unchanged.
+
+### Available reconfiguration options
+
+- `--create-stream-on-append` - Auto-create streams on append (`true`/`false`)
+- `--create-stream-on-read` - Auto-create streams on read (`true`/`false`)
+- `--storage-class` - Default storage class (`standard`, `express`)
+- `--retention-policy` - Default retention (e.g., `7d`, `30d`, `infinite`)
+- `--timestamping-mode` - Timestamping mode (`client-prefer`, `client-require`, `arrival`)
+- `--timestamping-uncapped` - Allow uncapped timestamps (`true`/`false`)
+- `--delete-on-empty-min-age` - Minimum age before deleting empty streams (e.g., `1d`)
+
+## Delete a basin
+
+<Warning>
+Deleting a basin is irreversible and will delete all streams and records within it.
+</Warning>
+
+Delete a basin and all its contents:
+
+```bash
+s2 delete-basin my-basin
+```
+
+Output:
+```
+✓ Basin deletion requested
+```
+
+Basin deletion is asynchronous. The basin enters a `deleting` state and is eventually removed.
+
+## Basin states
+
+Basins can be in one of three states:
+
+- **active** - Basin is ready for use
+- **creating** - Basin is being provisioned
+- **deleting** - Basin is being deleted
+
+Only basins in the `active` state can be used for stream operations.
+
+## Common workflows
+
+### Create a production basin with strict settings
+
+```bash
+s2 create-basin prod \
+  --storage-class express \
+  --retention-policy 90d \
+  --timestamping-mode client-require \
+  --timestamping-uncapped false
+```
+
+### Create a development basin with auto-creation
+
+```bash
+s2 create-basin dev \
+  --create-stream-on-append \
+  --retention-policy 7d \
+  --delete-on-empty-min-age 1d
+```
+
+This allows quick prototyping without manually creating streams, and automatically cleans up empty streams after 1 day.
+
+### Migration workflow
+
+<Steps>
+  <Step title="Create new basin">
+    ```bash
+    s2 create-basin new-basin --storage-class express
+    ```
+  </Step>
+  <Step title="Copy stream configurations">
+    ```bash
+    # List streams from old basin
+    s2 list-streams old-basin
+    
+    # Create streams in new basin
+    s2 create-stream s2://new-basin/events --storage-class express
+    s2 create-stream s2://new-basin/metrics --storage-class standard
+    ```
+  </Step>
+  <Step title="Migrate data">
+    ```bash
+    # Read from old basin and append to new basin
+    s2 read s2://old-basin/events | s2 append s2://new-basin/events
+    ```
+  </Step>
+</Steps>
+
+## Configuration reference
+
+### Storage classes
+
+- **standard** - Cost-optimized storage for most workloads
+- **express** - Low-latency storage for latency-sensitive workloads
+
+### Retention policies
+
+Specify as a duration or `infinite`:
+
+```bash
+--retention-policy 1d    # 1 day
+--retention-policy 2w    # 2 weeks
+--retention-policy 6m    # 6 months (approximated as 180d)
+--retention-policy 1y    # 1 year
+--retention-policy infinite
+```
+
+### Timestamping modes
+
+- **client-prefer** - Use client timestamp if provided, otherwise server timestamp
+- **client-require** - Require client timestamp (reject records without one)
+- **arrival** - Always use server arrival timestamp
+
+See [Timestamping](/concepts/streams#timestamping) for details.
+
+## Examples
+
+### List basins with production prefix
+
+```bash
+s2 list-basins --prefix "prod-"
+```
+
+### Create a basin for log aggregation
+
+```bash
+s2 create-basin logs \
+  --storage-class standard \
+  --retention-policy 30d \
+  --create-stream-on-append \
+  --timestamping-mode arrival
+```
+
+### Reconfigure retention policy
+
+```bash
+s2 reconfigure-basin logs --retention-policy 90d
+```

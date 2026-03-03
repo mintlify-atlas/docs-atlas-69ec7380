@@ -1,0 +1,120 @@
+---
+title: S2 Lite Overview
+description: Self-hostable implementation of the S2 API backed by object storage
+---
+
+S2 Lite is a self-hostable server implementation of the S2 API. It's a single-node binary with no external dependencies beyond object storage, making it easy to run on AWS S3, Tigris, MinIO, or any S3-compatible storage.
+
+## What is S2 Lite?
+
+S2 Lite is embedded as the `s2 lite` subcommand of the S2 CLI. It provides:
+
+- **Zero dependencies**: Single binary with no external services required (besides optional object storage)
+- **Multiple storage modes**: In-memory, local filesystem, or S3-compatible object storage
+- **Durable by default**: Data is always persisted to object storage before acknowledgment
+- **SlateDB engine**: Uses [SlateDB](https://slatedb.io) for storage, designed specifically for object stores
+- **Full S2 API**: Compatible with all S2 SDKs and the CLI
+
+## Architecture
+
+S2 Lite consists of:
+
+- **HTTP server** built with [axum](https://github.com/tokio-rs/axum)
+- **Stream tasks**: Each stream runs as a Tokio task ("streamer") that owns the tail position, serializes appends, and broadcasts to followers
+- **SlateDB storage**: Embedded key-value store backed entirely by object storage
+- **Pipelined appends**: Improved performance against high-latency object storage
+
+## Storage Modes
+
+<CardGroup cols={3}>
+  <Card title="In-Memory" icon="memory">
+    No persistence. Perfect for development, testing, and CI environments.
+  </Card>
+  <Card title="Local Filesystem" icon="folder">
+    Persist to local disk. Good for single-node deployments with attached storage.
+  </Card>
+  <Card title="Object Storage" icon="cloud">
+    Durable persistence on S3-compatible storage. Production-ready.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Simplified Deployment
+
+No distributed consensus, no coordination services, no complex cluster management. Just a single binary and object storage.
+
+### Development-Friendly
+
+Run in-memory mode for instant local development and testing:
+
+```bash
+s2 lite --port 8080
+```
+
+### Production-Ready
+
+Deploy to Kubernetes with the official Helm chart, or run as a Docker container with S3 backend.
+
+### Full API Coverage
+
+<Note>
+S2 Lite implements the complete S2 v1 API, including basins, streams, records, and streaming sessions. The only exception is access token management (not needed for self-hosted deployments).
+</Note>
+
+## Use Cases
+
+**Development & Testing**
+- Local development without cloud dependencies
+- Integration tests with in-memory mode
+- CI/CD pipeline testing
+
+**Self-Hosted Production**
+- On-premises deployments
+- Private cloud environments
+- Cost-optimized workloads
+
+**Edge & Regional**
+- Edge computing scenarios
+- Regional data residency requirements
+- Low-latency local processing
+
+## Compatibility
+
+S2 Lite works with all official S2 SDKs and tools:
+
+- **CLI**: ✅ v0.26+
+- **TypeScript SDK**: ✅ v0.22+
+- **Go SDK**: ✅ v0.11+
+- **Rust SDK**: ✅ v0.22+
+- **Python SDK**: 🚧 Migration to v1 API in progress
+- **Java SDK**: 🚧 Migration to v1 API in progress
+
+## Performance
+
+<Warning>
+Pipelining is currently disabled by default for safety. Enable it with `S2LITE_PIPELINE=true` to improve performance against high-latency object storage. This will be enabled by default in a future release.
+</Warning>
+
+For performance testing, use the built-in benchmark:
+
+```bash
+s2 bench my-basin --target-mibps 10 --duration 5s
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/lite/quickstart">
+    Get S2 Lite running in minutes
+  </Card>
+  <Card title="Deployment" icon="server" href="/lite/deployment">
+    Deploy to production environments
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/lite/kubernetes">
+    Deploy with Helm to Kubernetes
+  </Card>
+  <Card title="Configuration" icon="gear" href="/lite/configuration">
+    Configure S2 Lite for your needs
+  </Card>
+</CardGroup>

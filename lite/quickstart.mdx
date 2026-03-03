@@ -1,0 +1,323 @@
+---
+title: Quick Start
+description: Get started with S2 Lite in minutes
+---
+
+This guide will help you get S2 Lite running locally in minutes.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install S2 CLI">
+    Choose your preferred installation method:
+
+    <CodeGroup>
+    ```bash macOS/Linux (Homebrew)
+    brew install s2-streamstore/s2/s2
+    ```
+
+    ```bash Cargo
+    cargo install --locked s2-cli
+    ```
+
+    ```bash Release Binary
+    curl -fsSL https://raw.githubusercontent.com/s2-streamstore/s2/main/install.sh | bash
+    ```
+
+    ```bash Docker
+    docker pull ghcr.io/s2-streamstore/s2
+    ```
+    </CodeGroup>
+
+    Verify installation:
+    ```bash
+    s2 --version
+    ```
+
+    <Note>
+    Make sure you have version 0.26 or later for S2 Lite support.
+    </Note>
+  </Step>
+
+  <Step title="Start S2 Lite">
+    Run S2 Lite in in-memory mode (no persistence):
+
+    <CodeGroup>
+    ```bash CLI
+    s2 lite --port 8080
+    ```
+
+    ```bash Docker
+    docker run -p 8080:80 ghcr.io/s2-streamstore/s2 lite
+    ```
+    </CodeGroup>
+
+    You should see output like:
+    ```
+    2024-03-03T12:00:00.000000Z  INFO s2_lite::server: using in-memory object store
+    2024-03-03T12:00:00.000000Z  INFO s2_lite::server: starting plain http server addr="0.0.0.0:8080"
+    ```
+  </Step>
+
+  <Step title="Configure CLI">
+    Point the S2 CLI to your local Lite instance:
+
+    ```bash
+    export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+    export S2_BASIN_ENDPOINT="http://localhost:8080"
+    export S2_ACCESS_TOKEN="ignored"
+    ```
+
+    <Note>
+    The `S2_ACCESS_TOKEN` can be any value when using S2 Lite locally.
+    </Note>
+
+    Verify the server is ready:
+    ```bash
+    curl http://localhost:8080/health
+    ```
+
+    You should see:
+    ```
+    OK
+    ```
+  </Step>
+
+  <Step title="Create a Basin">
+    Create a basin with auto-creation of streams enabled:
+
+    ```bash
+    s2 create-basin my-basin \
+      --create-stream-on-append \
+      --create-stream-on-read
+    ```
+
+    List basins:
+    ```bash
+    s2 list-basins
+    ```
+  </Step>
+
+  <Step title="Write and Read Data">
+    Write some data to a stream:
+
+    ```bash
+    echo "Hello, S2!" | s2 append s2://my-basin/my-stream
+    ```
+
+    Read it back:
+    ```bash
+    s2 read s2://my-basin/my-stream
+    ```
+
+    You should see:
+    ```
+    Hello, S2!
+    ```
+  </Step>
+</Steps>
+
+## Running with Object Storage
+
+For persistent storage, run S2 Lite with an S3-compatible bucket.
+
+### AWS S3
+
+<Steps>
+  <Step title="Set up AWS credentials">
+    Make sure you have AWS credentials configured:
+
+    ```bash
+    aws configure
+    ```
+
+    Or use environment variables:
+    ```bash
+    export AWS_ACCESS_KEY_ID="your-access-key"
+    export AWS_SECRET_ACCESS_KEY="your-secret-key"
+    export AWS_REGION="us-east-1"
+    ```
+  </Step>
+
+  <Step title="Start S2 Lite with S3">
+    <CodeGroup>
+    ```bash CLI
+    s2 lite \
+      --port 8080 \
+      --bucket my-s2-bucket \
+      --path s2lite
+    ```
+
+    ```bash Docker
+    docker run -p 8080:80 \
+      -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+      -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+      -e AWS_REGION="${AWS_REGION}" \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket my-s2-bucket \
+      --path s2lite
+    ```
+    </CodeGroup>
+
+    <Note>
+    The `--path` argument sets a prefix within the bucket. This allows multiple S2 Lite instances to share a bucket.
+    </Note>
+  </Step>
+</Steps>
+
+### Tigris, R2, or Other S3-Compatible Storage
+
+<Steps>
+  <Step title="Set credentials and endpoint">
+    ```bash
+    export AWS_ACCESS_KEY_ID="your-access-key"
+    export AWS_SECRET_ACCESS_KEY="your-secret-key"
+    export AWS_ENDPOINT_URL_S3="https://fly.storage.tigris.dev"  # or your endpoint
+    ```
+  </Step>
+
+  <Step title="Start S2 Lite">
+    <CodeGroup>
+    ```bash CLI
+    s2 lite \
+      --port 8080 \
+      --bucket my-bucket \
+      --path s2lite
+    ```
+
+    ```bash Docker
+    docker run -p 8080:80 \
+      -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+      -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+      -e AWS_ENDPOINT_URL_S3="${AWS_ENDPOINT_URL_S3}" \
+      ghcr.io/s2-streamstore/s2 lite \
+      --bucket my-bucket \
+      --path s2lite
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Running with Local Filesystem
+
+For single-node deployments with local persistence:
+
+```bash
+s2 lite \
+  --port 8080 \
+  --local-root ./s2-data
+```
+
+<Warning>
+Local filesystem mode does not provide the same durability guarantees as object storage. Use it only for development or single-node scenarios where you have reliable local storage.
+</Warning>
+
+## Testing Performance
+
+Run the built-in benchmark to test your setup:
+
+```bash
+# Create a basin first
+s2 create-basin benchmark --create-stream-on-append
+
+# Run benchmark
+s2 bench benchmark --target-mibps 10 --duration 5s --catchup-delay 0s
+```
+
+You'll see real-time metrics:
+```
+Writing at 10.2 MiB/s, Reading at 10.1 MiB/s
+```
+
+## Testing Streaming Sessions
+
+S2 Lite supports bidirectional streaming sessions.
+
+<Steps>
+  <Step title="Open a read session">
+    In one terminal:
+    ```bash
+    s2 read s2://my-basin/events 2> /dev/null
+    ```
+
+    This will wait for new records.
+  </Step>
+
+  <Step title="Write data in real-time">
+    In another terminal:
+    ```bash
+    # Stream data line by line
+    echo -e "event1\nevent2\nevent3" | s2 append s2://my-basin/events
+    ```
+
+    You should see the events appear in the read terminal immediately.
+  </Step>
+</Steps>
+
+## Initializing Resources at Startup
+
+You can pre-create basins and streams using an init file.
+
+<Steps>
+  <Step title="Create an init file">
+    Create `resources.json`:
+
+    ```json resources.json
+    {
+      "basins": [
+        {
+          "name": "my-basin",
+          "config": {
+            "create_stream_on_append": true,
+            "default_stream_config": {
+              "storage_class": "standard",
+              "retention_policy": "7days"
+            }
+          },
+          "streams": [
+            {
+              "name": "events",
+              "config": {
+                "retention_policy": "infinite"
+              }
+            }
+          ]
+        }
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Start S2 Lite with the init file">
+    ```bash
+    s2 lite --port 8080 --init-file resources.json
+    ```
+
+    Or use the environment variable:
+    ```bash
+    export S2LITE_INIT_FILE=resources.json
+    s2 lite --port 8080
+    ```
+
+    <Note>
+    The init file uses create-or-reconfigure semantics, so it's safe to use on repeated restarts.
+    </Note>
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deployment" icon="server" href="/lite/deployment">
+    Deploy S2 Lite to production
+  </Card>
+  <Card title="Configuration" icon="gear" href="/lite/configuration">
+    Learn about all configuration options
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/lite/kubernetes">
+    Deploy with Helm
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/lite/monitoring">
+    Set up monitoring and observability
+  </Card>
+</CardGroup>

@@ -1,0 +1,401 @@
+---
+title: Streams
+description: Understanding streams as ordered sequences of records in S2
+---
+
+Streams are ordered, append-only sequences of records within a basin. They provide strict ordering guarantees and are the primary abstraction for reading and writing data in S2.
+
+## What is a stream?
+
+A stream is:
+
+- **Ordered**: Records maintain strict sequential ordering via sequence numbers
+- **Append-only**: Records can only be added to the end, never modified
+- **Identified**: Each stream has a unique name within its basin
+- **Durable**: All acknowledged appends are persisted to object storage
+- **Streamable**: Supports both historical reads and real-time streaming
+
+<Info>
+Think of a stream as an append-only log or event sequence, similar to a Kafka topic partition or a database transaction log.
+</Info>
+
+## Stream naming
+
+Stream names are flexible and have minimal restrictions:
+
+- **Length**: Between 1 and 512 bytes
+- **Characters**: Letters, numbers, underscores (`_`), and hyphens (`-`)
+- **Case-sensitive**: `MyStream` and `mystream` are different streams
+- **Unique**: Must be unique within a basin
+
+### Examples
+
+```
+user-123-events
+device_telemetry
+orders/2024/03
+log.application.production
+```
+
+<Tip>
+Stream names can include slashes (`/`) and dots (`.`) which makes hierarchical naming schemes possible.
+</Tip>
+
+## Stream positions
+
+Each record in a stream has a unique position defined by two components:
+
+```rust
+pub struct StreamPosition {
+    pub seq_num: u64,      // Unique sequence number
+    pub timestamp: u64,    // Timestamp in milliseconds
+}
+```
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:23-27`:
+
+### Sequence numbers
+
+- **Start at 0**: The first record in a stream has `seq_num: 0`
+- **Sequential**: Each new record increments the sequence number by 1
+- **Unique**: No two records in a stream have the same sequence number
+- **Immutable**: Sequence numbers never change once assigned
+
+### Timestamps
+
+- **Milliseconds since epoch**: Unix timestamp in milliseconds
+- **Monotonic**: Always increasing or equal within a stream
+- **Configurable source**: Can be client-specified, server-assigned, or hybrid
+
+## Stream tail
+
+The **tail** of a stream is the position where the next record will be written:
+
+```json
+{
+  "tail": {
+    "seq_num": 1000,
+    "timestamp": 1709481600000
+  }
+}
+```
+
+- `tail.seq_num` is the sequence number that will be assigned to the next appended record
+- `tail.timestamp` is the timestamp of the most recent record
+
+## Configuration
+
+Streams can be configured with settings that control behavior and retention:
+
+```json
+{
+  "stream": "my-stream",
+  "config": {
+    "storage_class": "express",
+    "retention_policy": {
+      "age": 2592000
+    },
+    "timestamping": {
+      "mode": "client-require",
+      "uncapped": true
+    },
+    "delete_on_empty": {
+      "min_age_secs": 7200
+    }
+  }
+}
+```
+
+### Storage class
+
+Controls performance characteristics (s2.dev only):
+
+- **standard**: Append tail latency under 400ms, cost-optimized
+- **express**: Append tail latency under 40ms, performance-optimized
+
+<Note>
+In s2-lite, storage class is not applicable as performance is determined by the underlying object storage and configuration.
+</Note>
+
+### Retention policy
+
+Controls how long records are kept before automatic trimming:
+
+**Age-based retention**:
+```json
+{
+  "retention_policy": {
+    "age": 604800  // 7 days in seconds
+  }
+}
+```
+
+**Infinite retention**:
+```json
+{
+  "retention_policy": {
+    "infinite": {}
+  }
+}
+```
+
+<Warning>
+Records older than the retention age are automatically trimmed and become unreadable. This cannot be undone.
+</Warning>
+
+### Timestamping configuration
+
+Controls how timestamps are assigned to appended records:
+
+#### Mode
+
+**client-prefer** (default):
+- Use client-provided timestamp if present
+- Fall back to server arrival time if not provided
+- Best for most use cases
+
+**client-require**:
+- Client must provide timestamp
+- Append fails if timestamp is missing
+- Use when client timestamp is critical
+
+**arrival**:
+- Always use server arrival time
+- Ignore any client-provided timestamp
+- Use for strict server-side ordering
+
+From `/home/daytona/workspace/source/api/src/v1/config.rs:75-87`:
+
+#### Uncapped
+
+- **false** (default): Client timestamps are capped at server arrival time
+- **true**: Client can provide future timestamps
+
+```rust
+if !uncapped && timestamp > now {
+    timestamp = now;
+}
+```
+
+From `/home/daytona/workspace/source/lite/src/backend/streamer.rs:609-611`:
+
+### Delete-on-empty
+
+Automatically delete a stream after it has been empty for a specified duration:
+
+```json
+{
+  "delete_on_empty": {
+    "min_age_secs": 3600  // Delete if empty for 1 hour
+  }
+}
+```
+
+- Set `min_age_secs: 0` to disable (default)
+- Empty streams are deleted after the configured period
+- Useful for temporary or ephemeral streams
+
+## Stream lifecycle
+
+### Creation
+
+<CodeGroup>
+```bash CLI
+s2 create-stream s2://my-basin/my-stream
+```
+
+```bash cURL
+curl -X PUT https://api.s2.dev/streams/my-stream \
+  -H "S2-Basin: my-basin" \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream": "my-stream",
+    "config": {
+      "retention_policy": {"age": 604800}
+    }
+  }'
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::CreateStreamInput};
+
+let input = CreateStreamInput::new(
+    "my-basin".parse()?,
+    "my-stream".parse()?
+);
+let stream = s2.create_stream(input).await?;
+```
+</CodeGroup>
+
+Streams can also be created automatically if the basin has `create_stream_on_append` or `create_stream_on_read` enabled.
+
+### Listing streams
+
+<CodeGroup>
+```bash CLI
+s2 list-streams s2://my-basin/ --prefix device-
+```
+
+```bash cURL
+curl https://api.s2.dev/streams?prefix=device- \
+  -H "S2-Basin: my-basin" \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}"
+```
+</CodeGroup>
+
+Response:
+```json
+{
+  "streams": [
+    {
+      "name": "device-001",
+      "created_at": "2024-03-03T10:00:00Z",
+      "deleted_at": null
+    },
+    {
+      "name": "device-002",
+      "created_at": "2024-03-03T10:15:00Z",
+      "deleted_at": null
+    }
+  ],
+  "has_more": false
+}
+```
+
+### Checking the tail
+
+Get the current tail position without reading records:
+
+```bash
+curl https://api.s2.dev/streams/my-stream/tail \
+  -H "S2-Basin: my-basin" \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}"
+```
+
+Response:
+```json
+{
+  "tail": {
+    "seq_num": 42,
+    "timestamp": 1709481600000
+  }
+}
+```
+
+### Deletion
+
+<Warning>
+Deleting a stream deletes all its records permanently. This operation cannot be undone.
+</Warning>
+
+<CodeGroup>
+```bash CLI
+s2 delete-stream s2://my-basin/my-stream
+```
+
+```bash cURL
+curl -X DELETE https://api.s2.dev/streams/my-stream \
+  -H "S2-Basin: my-basin" \
+  -H "Authorization: Bearer ${S2_ACCESS_TOKEN}"
+```
+</CodeGroup>
+
+## Streamer implementation
+
+In s2-lite, each stream is backed by a `Streamer` - a Tokio task that manages the stream's state:
+
+From `/home/daytona/workspace/source/lite/src/backend/streamer.rs:153-166`:
+
+```rust
+struct Streamer {
+    db: slatedb::Db,
+    stream_id: StreamId,
+    config: OptionalStreamConfig,
+    fencing_token: CommandState<FencingToken>,
+    trim_point: CommandState<RangeTo<SeqNum>>,
+    append_futs: FuturesOrdered<...>,
+    pending_appends: append::PendingAppends,
+    stable_pos: StreamPosition,
+    follow_tx: broadcast::Sender<...>,
+    bgtask_trigger_tx: broadcast::Sender<...>,
+}
+```
+
+The Streamer:
+
+- **Serializes appends**: Ensures strict ordering of writes
+- **Assigns sequence numbers**: Manages the tail position
+- **Enforces fencing**: Implements conditional write semantics
+- **Broadcasts to followers**: Notifies real-time readers of new records
+- **Manages durability**: Coordinates with SlateDB for persistence
+
+## Stream storage
+
+In SlateDB, streams are stored using multiple key types:
+
+From `/home/daytona/workspace/source/lite/src/backend/kv/mod.rs:67-98`:
+
+```rust
+/// (SM) per-stream, updatable
+/// Key: BasinName \0 StreamName
+/// Value: StreamMeta
+StreamMeta(BasinName, StreamName),
+
+/// (SIM) per-stream, immutable
+/// Key: StreamID
+/// Value: BasinName \0 StreamName
+StreamIdMapping(StreamId),
+
+/// (SP) per-stream, updatable
+/// Key: StreamID
+/// Value: SeqNum Timestamp WriteTimestampSecs
+StreamTailPosition(StreamId),
+
+/// (SFT) per-stream, updatable, optional
+/// Key: StreamID
+/// Value: FencingToken
+StreamFencingToken(StreamId),
+
+/// (STP) per-stream, updatable, optional
+/// Key: StreamID
+/// Value: NonZeroSeqNum
+StreamTrimPoint(StreamId),
+```
+
+## Performance considerations
+
+### Append throughput
+
+From s2-lite implementation:
+
+- **Pipelining**: Multiple appends can be in-flight simultaneously
+- **Batch size**: Up to 1000 records per batch, max 1 MiB metered bytes
+- **Backpressure**: Semaphore-based flow control prevents overwhelming storage
+
+From `/home/daytona/workspace/source/lite/src/backend/streamer.rs:460-477`:
+
+### Read patterns
+
+- **Sequential reads**: Most efficient, leverages SlateDB's LSM structure
+- **Timestamp-based**: Requires secondary index lookup
+- **Tail reads**: Can follow live stream with minimal latency
+
+## Best practices
+
+1. **Choose meaningful names**: Use hierarchical naming for related streams
+2. **Set appropriate retention**: Balance storage costs with data retention needs
+3. **Configure timestamping**: Match client/server timestamp behavior to your use case
+4. **Monitor tail lag**: Track the difference between append and read positions
+5. **Use fencing tokens**: Implement exactly-once semantics for critical workflows
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Records" icon="file" href="/concepts/records">
+    Learn about the structure of stream records
+  </Card>
+  <Card title="Durability" icon="shield" href="/concepts/durability">
+    Understand durability guarantees
+  </Card>
+</CardGroup>

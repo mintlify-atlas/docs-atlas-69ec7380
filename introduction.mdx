@@ -1,0 +1,94 @@
+---
+title: Introduction
+description: S2 is a serverless datastore for real-time streaming data built for durability and performance
+---
+
+# Introduction to S2
+
+S2 is a serverless datastore for real-time streaming data. It provides a simple, durable API for building streaming applications without managing infrastructure.
+
+## What is S2?
+
+S2 combines the simplicity of cloud storage with the performance of streaming databases. Your data is always durable on object storage before being acknowledged, ensuring you never lose a record.
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get started with S2 in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the CLI and SDKs
+  </Card>
+  <Card title="Concepts" icon="book" href="/concepts/overview">
+    Learn core S2 concepts
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore the REST API
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Durable by default
+
+Every record is persisted to object storage before being acknowledged. Your data is safe even if servers fail.
+
+### Real-time streaming
+
+Read from streams in real-time as new records arrive. S2 supports both historical catchup and live tailing in a single session.
+
+### Serverless architecture
+
+No infrastructure to manage. S2 scales automatically based on your workload.
+
+### Self-hostable
+
+Run S2 Lite locally for development or deploy it to your own infrastructure using Docker or Kubernetes.
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Event streaming" icon="stream">
+    Build event-driven architectures with guaranteed delivery
+  </Card>
+  <Card title="Data pipelines" icon="pipe">
+    Stream data between services with durable queues
+  </Card>
+  <Card title="Real-time analytics" icon="chart-line">
+    Process streaming data as it arrives
+  </Card>
+  <Card title="Integration testing" icon="flask">
+    Use in-memory S2 Lite as a test fixture
+  </Card>
+</CardGroup>
+
+## How it works
+
+S2 organizes data into **basins** and **streams**:
+
+- A **basin** is a container for streams, similar to a database
+- A **stream** is an ordered, append-only log of records
+
+You can interact with S2 using:
+
+- The **CLI** for command-line operations
+- **SDKs** for Rust, TypeScript, Go, and more
+- The **REST API** for direct HTTP access
+- **S2 Lite** for local development and self-hosting
+
+<Tip>
+S2 Lite is embedded in the CLI and provides a fully compatible S2 API implementation that you can run locally or deploy to your own infrastructure.
+</Tip>
+
+## Next steps
+
+<Steps>
+  <Step title="Install the CLI">
+    Follow the [installation guide](/installation) to install the S2 CLI
+  </Step>
+  <Step title="Try the quick start">
+    Complete the [quick start guide](/quickstart) to create your first basin and stream
+  </Step>
+  <Step title="Explore the SDK">
+    Build applications using the [Rust SDK](https://docs.rs/s2-sdk) or other language SDKs
+  </Step>
+</Steps>

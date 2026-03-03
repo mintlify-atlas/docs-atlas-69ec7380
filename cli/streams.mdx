@@ -1,0 +1,388 @@
+---
+title: Stream management
+description: Create and manage streams using the S2 CLI
+---
+
+Streams are ordered sequences of records within a basin. Each stream has its own configuration for storage class, retention, and timestamping.
+
+## List streams
+
+List all streams in a basin:
+
+```bash
+s2 list-streams my-basin
+```
+
+Output:
+```
+s2://my-basin/events
+s2://my-basin/logs
+s2://my-basin/metrics
+```
+
+### Using S2 URI format
+
+You can also specify the basin using an S2 URI:
+
+```bash
+s2 list-streams s2://my-basin
+```
+
+### Filter by prefix
+
+List only streams matching a prefix:
+
+```bash
+s2 list-streams my-basin --prefix "events/"
+```
+
+Output:
+```
+s2://my-basin/events/api
+s2://my-basin/events/web
+s2://my-basin/events/mobile
+```
+
+### Pagination
+
+Limit results:
+
+```bash
+s2 list-streams my-basin --limit 100
+```
+
+Start after a specific stream:
+
+```bash
+s2 list-streams my-basin --start-after "events/api"
+```
+
+Disable auto-pagination:
+
+```bash
+s2 list-streams my-basin --limit 50 --no-auto-paginate
+```
+
+### Using the ls shortcut
+
+The `ls` command lists streams when given a basin name or URI:
+
+```bash
+s2 ls my-basin
+s2 ls s2://my-basin
+s2 ls s2://my-basin/events/
+```
+
+## Create a stream
+
+Create a stream with default settings:
+
+```bash
+s2 create-stream s2://my-basin/events
+```
+
+Output:
+```
+✓ Stream created
+```
+
+### Configure stream properties
+
+Set storage class, retention, and timestamping:
+
+```bash
+s2 create-stream s2://my-basin/events \
+  --storage-class express \
+  --retention-policy 30d \
+  --timestamping-mode client-require \
+  --timestamping-uncapped false
+```
+
+### Enable auto-deletion of empty streams
+
+Automatically delete the stream when empty:
+
+```bash
+s2 create-stream s2://my-basin/temp-stream \
+  --retention-policy 1d \
+  --delete-on-empty-min-age 1h
+```
+
+The stream will be deleted 1 hour after it becomes empty (no records remain after retention policy is applied).
+
+## Get stream configuration
+
+View the current configuration of a stream:
+
+```bash
+s2 get-stream-config s2://my-basin/events
+```
+
+Output (table format):
+```
+┌─────────────────────┬─────────────────────────┐
+│ storage_class       │ express                 │
+│ retention_policy    │ 2592000 (30d)           │
+│ timestamping        │                         │
+│   mode              │ client-require          │
+│   uncapped          │ false                   │
+│ delete_on_empty     │                         │
+│   min_age_secs      │ 3600 (1h)               │
+└─────────────────────┴─────────────────────────┘
+```
+
+## Reconfigure a stream
+
+Update an existing stream's configuration:
+
+```bash
+s2 reconfigure-stream s2://my-basin/events \
+  --retention-policy 90d
+```
+
+Output:
+```
+✓ Stream reconfigured
+```
+
+Only specified fields are updated; other settings remain unchanged.
+
+### Available reconfiguration options
+
+- `--storage-class` - Storage class (`standard`, `express`)
+- `--retention-policy` - Retention policy (e.g., `7d`, `30d`, `infinite`)
+- `--timestamping-mode` - Timestamping mode (`client-prefer`, `client-require`, `arrival`)
+- `--timestamping-uncapped` - Allow uncapped timestamps (`true`/`false`)
+- `--delete-on-empty-min-age` - Minimum age before deleting empty streams (e.g., `1d`)
+
+<Note>
+Storage class changes only apply to newly appended records. Existing records retain their original storage class.
+</Note>
+
+## Delete a stream
+
+<Warning>
+Deleting a stream is irreversible and will delete all records in the stream.
+</Warning>
+
+Delete a stream:
+
+```bash
+s2 delete-stream s2://my-basin/events
+```
+
+Output:
+```
+✓ Stream deletion requested
+```
+
+Deletion is asynchronous. The stream is marked for deletion and eventually removed.
+
+## Check stream tail position
+
+Get the current tail position (next sequence number and last timestamp):
+
+```bash
+s2 check-tail s2://my-basin/events
+```
+
+Output:
+```
+12345 @ 1704067200000
+```
+
+This shows:
+- Next sequence number: `12345`
+- Timestamp of last record: `1704067200000` (milliseconds since Unix epoch)
+
+## Trim a stream
+
+Set a trim point to delete old records:
+
+```bash
+s2 trim s2://my-basin/events 10000
+```
+
+This deletes all records with sequence numbers less than `10000`.
+
+Output:
+```
+✓ [APPENDED] trim to 10000 // tail: 12345 @ 1704067200000
+```
+
+### Trim with fencing token
+
+Enforce a fencing token when trimming:
+
+```bash
+s2 trim s2://my-basin/events 10000 --fencing-token "my-token"
+```
+
+### Trim with sequence number match
+
+Only trim if the next sequence number matches the expected value:
+
+```bash
+s2 trim s2://my-basin/events 10000 --match-seq-num 12345
+```
+
+This prevents accidental trims if records have been appended since you last checked.
+
+<Note>
+Trimming is eventually consistent. Trimmed records may be visible briefly before deletion completes.
+</Note>
+
+## Fence a stream
+
+Set a fencing token to coordinate writes:
+
+```bash
+s2 fence s2://my-basin/events "new-token"
+```
+
+Output:
+```
+✓ [APPENDED] new fencing token "new-token" // tail: 12345 @ 1704067200000
+```
+
+After fencing, subsequent appends must provide the matching fencing token or they will be rejected.
+
+### Enforce previous fencing token
+
+Only set the new token if the current token matches:
+
+```bash
+s2 fence s2://my-basin/events "new-token" --fencing-token "old-token"
+```
+
+### Fence with sequence number match
+
+```bash
+s2 fence s2://my-basin/events "new-token" --match-seq-num 12345
+```
+
+See [Fencing](/concepts/streams#fencing) for details on coordination patterns.
+
+## Common workflows
+
+### Create a stream for real-time events
+
+```bash
+s2 create-stream s2://prod/events \
+  --storage-class express \
+  --retention-policy 7d \
+  --timestamping-mode client-require
+```
+
+### Create a stream for archival logs
+
+```bash
+s2 create-stream s2://archive/logs \
+  --storage-class standard \
+  --retention-policy infinite \
+  --timestamping-mode arrival
+```
+
+### Migrate stream to different storage class
+
+<Steps>
+  <Step title="Create new stream with desired storage class">
+    ```bash
+    s2 create-stream s2://basin/events-new --storage-class express
+    ```
+  </Step>
+  <Step title="Copy records from old stream">
+    ```bash
+    s2 read s2://basin/events | s2 append s2://basin/events-new
+    ```
+  </Step>
+  <Step title="Update application to use new stream">
+    Deploy application changes to write to `events-new`.
+  </Step>
+  <Step title="Delete old stream">
+    ```bash
+    s2 delete-stream s2://basin/events
+    ```
+  </Step>
+</Steps>
+
+### Cleanup old records periodically
+
+```bash
+#!/bin/bash
+# trim-old-records.sh
+
+# Get current tail
+TAIL=$(s2 check-tail s2://basin/events | awk '{print $1}')
+
+# Calculate trim point (keep last 1 million records)
+TRIM_POINT=$((TAIL - 1000000))
+
+if [ $TRIM_POINT -gt 0 ]; then
+  echo "Trimming to $TRIM_POINT"
+  s2 trim s2://basin/events $TRIM_POINT
+fi
+```
+
+## Configuration reference
+
+### Storage classes
+
+- **standard** - Cost-optimized, higher latency
+- **express** - Low-latency, higher cost
+
+### Retention policies
+
+Examples:
+
+```bash
+--retention-policy 1d        # 1 day
+--retention-policy 1w        # 1 week
+--retention-policy 30d       # 30 days
+--retention-policy 1y        # 1 year
+--retention-policy infinite  # Never delete
+```
+
+### Timestamping modes
+
+- **client-prefer** - Use client timestamp if provided, otherwise server timestamp
+- **client-require** - Reject records without client timestamp
+- **arrival** - Always use server arrival timestamp
+
+See [Timestamping](/concepts/streams#timestamping) for details.
+
+### Delete-on-empty
+
+Automatically delete streams when they become empty:
+
+```bash
+--delete-on-empty-min-age 1d
+```
+
+The stream must be empty (all records deleted by retention) for at least the specified duration before deletion.
+
+## Examples
+
+### List all event streams
+
+```bash
+s2 list-streams prod --prefix "events/"
+```
+
+### Create stream with all options
+
+```bash
+s2 create-stream s2://prod/high-priority \
+  --storage-class express \
+  --retention-policy 90d \
+  --timestamping-mode client-require \
+  --timestamping-uncapped false \
+  --delete-on-empty-min-age 7d
+```
+
+### Check tail before appending
+
+```bash
+TAIL=$(s2 check-tail s2://basin/stream | awk '{print $1}')
+echo "Next sequence number: $TAIL"
+```

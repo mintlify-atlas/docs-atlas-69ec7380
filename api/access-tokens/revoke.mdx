@@ -1,0 +1,227 @@
+---
+title: "Revoke Access Token"
+description: "Revoke an existing access token"
+---
+
+## Endpoint
+
+```
+DELETE /v1/access-tokens/{id}
+```
+
+Revoke an access token by its ID. Once revoked, the token can no longer be used to authenticate requests.
+
+<Warning>
+  This endpoint is not supported in s2-lite. Access token management is only available in S2 Cloud.
+</Warning>
+
+<Note>
+  Revoking a token is immediate and cannot be undone. The token will be invalid for all future requests.
+</Note>
+
+## Path Parameters
+
+<ParamField path="id" type="string" required>
+  The ID of the access token to revoke.
+</ParamField>
+
+## Response
+
+Returns `204 No Content` on success with an empty response body.
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE "https://aws.s2.dev/v1/access-tokens/old-token" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::S2Config};
+
+let client = S2::new(S2Config::new(token))?;
+
+// Revoke a token
+client
+    .revoke_access_token("old-token".parse()?)
+    .await?;
+
+println!("Token revoked successfully");
+```
+
+```typescript TypeScript SDK
+import { S2 } from '@s2/sdk';
+
+const client = new S2({ accessToken: process.env.S2_ACCESS_TOKEN });
+
+// Revoke a token
+await client.revokeAccessToken('old-token');
+
+console.log('Token revoked successfully');
+```
+
+</CodeGroup>
+
+<ResponseExample>
+
+```text 204 No Content
+(empty response body)
+```
+
+```json 404 Not Found
+{
+  "code": "not_found",
+  "message": "access token 'nonexistent-token' not found"
+}
+```
+
+```json 403 Forbidden
+{
+  "code": "forbidden",
+  "message": "insufficient permissions to revoke this token"
+}
+```
+
+</ResponseExample>
+
+## Permissions
+
+To revoke a token, your access token must have:
+
+1. The `revoke-access-token` operation permission (via `ops` or `op_groups.account.write`)
+2. The target token must be within the scope of your `access_tokens` resource set
+
+### Example: Token with revocation permissions
+
+```json
+{
+  "id": "admin-token",
+  "scope": {
+    "access_tokens": {"prefix": "app-"},
+    "op_groups": {
+      "account": {
+        "read": true,
+        "write": true
+      }
+    }
+  }
+}
+```
+
+This token can revoke any token whose ID starts with `"app-"`.
+
+## Common Scenarios
+
+### Rotate tokens
+
+When rotating tokens, create the new token first, then revoke the old one:
+
+```bash
+# Issue new token
+NEW_TOKEN=$(curl -X POST "https://aws.s2.dev/v1/access-tokens" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "app-v2-token",
+    "scope": {...}
+  }' | jq -r '.access_token')
+
+# Update your application to use the new token
+echo "Deploying new token..."
+
+# Revoke old token
+curl -X DELETE "https://aws.s2.dev/v1/access-tokens/app-v1-token" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+```
+
+### Clean up expired tokens
+
+List and revoke tokens that are no longer needed:
+
+```bash
+# List tokens with a specific prefix
+TOKENS=$(curl -X GET "https://aws.s2.dev/v1/access-tokens?prefix=temp-" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN" \
+  | jq -r '.access_tokens[].id')
+
+# Revoke each token
+for token_id in $TOKENS; do
+  curl -X DELETE "https://aws.s2.dev/v1/access-tokens/$token_id" \
+    -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+  echo "Revoked: $token_id"
+done
+```
+
+### Respond to security incidents
+
+If a token is compromised, revoke it immediately:
+
+```rust
+use s2_sdk::{S2, types::S2Config};
+
+async fn revoke_compromised_token(
+    admin_token: &str,
+    compromised_token_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = S2::new(S2Config::new(admin_token.to_string()))?;
+    
+    // Immediately revoke the compromised token
+    client
+        .revoke_access_token(compromised_token_id.parse()?)
+        .await?;
+    
+    println!("Compromised token {} has been revoked", compromised_token_id);
+    
+    Ok(())
+}
+```
+
+## Error Handling
+
+<AccordionGroup>
+
+<Accordion title="404 Not Found" icon="circle-xmark">
+  The specified token ID does not exist. This could mean:
+  - The token was already revoked
+  - The token ID was mistyped
+  - The token never existed
+  
+  You can safely ignore this error if your goal is to ensure the token is not active.
+</Accordion>
+
+<Accordion title="403 Forbidden" icon="ban">
+  Your access token lacks permission to revoke the target token. Check that:
+  - Your token has `revoke-access-token` operation permission
+  - The target token ID is within your `access_tokens` scope
+  - You're not trying to revoke your own currently-in-use token (use a different admin token)
+</Accordion>
+
+<Accordion title="401 Unauthorized" icon="lock">
+  Your access token is invalid, expired, or missing. Ensure you're sending the correct `Authorization: Bearer <token>` header.
+</Accordion>
+
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Audit Token Usage" icon="clipboard-list">
+  Regularly review active tokens using the [List Access Tokens](/api/access-tokens/list) endpoint and revoke unused ones.
+</Card>
+
+<Card title="Automate Rotation" icon="arrows-rotate">
+  Implement automated token rotation for long-lived tokens to minimize exposure.
+</Card>
+
+<Card title="Monitor Revocations" icon="eye">
+  Log token revocations for security auditing and incident response.
+</Card>
+
+<Card title="Graceful Rotation" icon="handshake">
+  When rotating tokens, ensure the new token is deployed before revoking the old one to avoid service disruption.
+</Card>
+
+</CardGroup>

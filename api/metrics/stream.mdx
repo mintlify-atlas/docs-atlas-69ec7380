@@ -1,0 +1,186 @@
+---
+title: 'Get Stream Metrics'
+description: 'Retrieve metrics for a specific stream'
+---
+
+## GET /metrics/{basin}/{stream}
+
+Retrieve usage metrics for a specific stream within a basin. This endpoint provides stream-level storage information.
+
+### Path Parameters
+
+<ParamField path="basin" type="string" required>
+  Basin name containing the stream
+</ParamField>
+
+<ParamField path="stream" type="string" required>
+  Stream name to retrieve metrics for
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="set" type="string" required>
+  Metric set to return. Available values:
+  - `storage` - Amount of stored data, per minute, for the specific stream
+</ParamField>
+
+<ParamField query="start" type="integer">
+  Start timestamp as Unix epoch seconds. Required for timeseries metric sets.
+</ParamField>
+
+<ParamField query="end" type="integer">
+  End timestamp as Unix epoch seconds. Required for timeseries metric sets.
+</ParamField>
+
+<ParamField query="interval" type="string">
+  Interval to aggregate over for timeseries metric sets. Available values:
+  - `minute`
+  - `hour`
+  - `day`
+</ParamField>
+
+### Response
+
+Returns a `MetricSetResponse` object containing the requested stream metrics.
+
+<ResponseField name="values" type="array">
+  Array of metrics comprising the set. Each metric can be one of four types:
+  
+  <Expandable title="Metric Types">
+    <ResponseField name="scalar" type="object">
+      Single named value
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Metric name
+        </ResponseField>
+        <ResponseField name="unit" type="string">
+          Unit of the metric (`bytes` or `operations`)
+        </ResponseField>
+        <ResponseField name="value" type="number">
+          Metric value
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="accumulation" type="object">
+      Named series of (timestamp, value) points representing an accumulation over a specified interval
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Timeseries name
+        </ResponseField>
+        <ResponseField name="unit" type="string">
+          Unit of the metric (`bytes` or `operations`)
+        </ResponseField>
+        <ResponseField name="interval" type="string">
+          The interval at which data points are accumulated (`minute`, `hour`, or `day`)
+        </ResponseField>
+        <ResponseField name="values" type="array">
+          Array of [timestamp, value] tuples. Each tuple represents the accumulated value for the time period starting at the timestamp, spanning one interval.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="gauge" type="object">
+      Named series of (timestamp, value) points each representing an instantaneous value
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Timeseries name
+        </ResponseField>
+        <ResponseField name="unit" type="string">
+          Unit of the metric (`bytes` or `operations`)
+        </ResponseField>
+        <ResponseField name="values" type="array">
+          Array of [timestamp, value] tuples. Each tuple represents the value at the instant of the timestamp.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="label" type="object">
+      Set of string labels
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Label name
+        </ResponseField>
+        <ResponseField name="values" type="array">
+          Array of string values
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL - Stream Storage
+curl -X GET "https://aws.s2.dev/v1/metrics/my-basin/my-stream?set=storage&start=1704067200&end=1704153600&interval=minute" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```bash cURL - Hourly Storage
+curl -X GET "https://aws.s2.dev/v1/metrics/analytics/events?set=storage&start=1704067200&end=1704153600&interval=hour" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json Storage Response (Minute Intervals)
+{
+  "values": [
+    {
+      "gauge": {
+        "name": "storage",
+        "unit": "bytes",
+        "values": [
+          [1704067200, 268435456],
+          [1704067260, 268697600],
+          [1704067320, 268959744],
+          [1704067380, 269221888]
+        ]
+      }
+    }
+  ]
+}
+```
+
+```json Storage Response (Hourly Intervals)
+{
+  "values": [
+    {
+      "gauge": {
+        "name": "storage",
+        "unit": "bytes",
+        "values": [
+          [1704067200, 268435456],
+          [1704070800, 285212672],
+          [1704074400, 301989888],
+          [1704078000, 318767104]
+        ]
+      }
+    }
+  ]
+}
+```
+
+</ResponseExample>
+
+## Error Responses
+
+<ResponseField name="400" type="Bad Request">
+  Invalid query parameters, malformed request, or invalid basin/stream name
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  Invalid or missing authentication token, or insufficient permissions for the stream
+</ResponseField>
+
+<ResponseField name="408" type="Request Timeout">
+  Request took too long to process
+</ResponseField>
+
+## Notes
+
+- Storage metrics represent the instantaneous amount of data stored in the stream at each timestamp
+- The storage metric uses a gauge type, meaning each data point represents the value at that specific point in time
+- Finer granularity (minute intervals) provides more detailed tracking of storage growth over time

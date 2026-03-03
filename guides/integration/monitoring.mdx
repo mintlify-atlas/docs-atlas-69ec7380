@@ -1,0 +1,330 @@
+---
+title: Monitoring S2 Deployments
+description: Monitor S2 Lite using health checks and Prometheus metrics
+---
+
+## Overview
+
+S2 Lite provides built-in monitoring endpoints for health checks and metrics collection, making it easy to integrate with your observability stack.
+
+## Health Checks
+
+The `/health` endpoint provides a simple way to check if S2 Lite is running and ready to accept requests.
+
+### Endpoint Details
+
+- **URL**: `/health`
+- **Method**: GET
+- **Success Response**: HTTP 200 OK
+- **Use Cases**: Readiness probes, liveness probes, load balancer health checks
+
+### Example Usage
+
+```bash
+curl -f http://localhost:8080/health
+```
+
+### Kubernetes Probes
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s2-lite
+spec:
+  containers:
+  - name: s2-lite
+    image: ghcr.io/s2-streamstore/s2:latest
+    ports:
+    - containerPort: 80
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 80
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+```
+
+## Prometheus Metrics
+
+S2 Lite exposes internal metrics in Prometheus text format at the `/metrics` endpoint.
+
+<Note>
+The `/metrics` endpoint returns Prometheus-formatted metrics for operational monitoring, not business metrics like storage or throughput.
+</Note>
+
+### Available Metrics
+
+S2 Lite tracks the following operational metrics:
+
+#### Append Latency Metrics
+
+**`s2_append_permit_latency_seconds`**
+- **Type**: Histogram
+- **Description**: Time taken to acquire permission to append
+- **Buckets**: 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s
+
+**`s2_append_ack_latency_seconds`**
+- **Type**: Histogram
+- **Description**: End-to-end append acknowledgment latency
+- **Buckets**: 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s
+
+#### Batch Size Metrics
+
+**`s2_append_batch_records`**
+- **Type**: Histogram
+- **Description**: Number of records per append batch
+- **Buckets**: 1, 10, 50, 100, 250, 500, 1000
+
+**`s2_append_batch_bytes`**
+- **Type**: Histogram
+- **Description**: Size in bytes of append batches
+- **Buckets**: 512B, 1KB, 4KB, 16KB, 64KB, 256KB, 512KB, 1MB
+
+### Scraping Metrics
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+Example output:
+
+```
+# HELP s2_append_ack_latency_seconds Append ack latency in seconds
+# TYPE s2_append_ack_latency_seconds histogram
+s2_append_ack_latency_seconds_bucket{le="0.005"} 145
+s2_append_ack_latency_seconds_bucket{le="0.01"} 289
+s2_append_ack_latency_seconds_bucket{le="0.025"} 312
+s2_append_ack_latency_seconds_bucket{le="0.05"} 315
+s2_append_ack_latency_seconds_bucket{le="+Inf"} 320
+s2_append_ack_latency_seconds_sum 2.456
+s2_append_ack_latency_seconds_count 320
+
+# HELP s2_append_batch_bytes Append batch size in bytes
+# TYPE s2_append_batch_bytes histogram
+s2_append_batch_bytes_bucket{le="512"} 45
+s2_append_batch_bytes_bucket{le="1024"} 120
+s2_append_batch_bytes_bucket{le="4096"} 280
+...
+```
+
+## Prometheus Configuration
+
+### Prometheus Scrape Config
+
+Add S2 Lite as a scrape target in `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 's2-lite'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:8080']
+        labels:
+          service: 's2-lite'
+          environment: 'production'
+```
+
+### Kubernetes ServiceMonitor
+
+If using Prometheus Operator:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s2-lite
+  labels:
+    app: s2-lite
+spec:
+  selector:
+    matchLabels:
+      app: s2-lite
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+```
+
+### Helm Chart Configuration
+
+When using the S2 Lite Helm chart:
+
+```yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      prometheus: kube-prometheus
+```
+
+## Grafana Dashboards
+
+### Sample Queries
+
+**Average Append Latency (P50, P95, P99)**
+```promql
+# P50
+histogram_quantile(0.50, rate(s2_append_ack_latency_seconds_bucket[5m]))
+
+# P95
+histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m]))
+
+# P99
+histogram_quantile(0.99, rate(s2_append_ack_latency_seconds_bucket[5m]))
+```
+
+**Append Rate**
+```promql
+rate(s2_append_ack_latency_seconds_count[5m])
+```
+
+**Average Batch Size (Records)**
+```promql
+rate(s2_append_batch_records_sum[5m]) / rate(s2_append_batch_records_count[5m])
+```
+
+**Average Batch Size (Bytes)**
+```promql
+rate(s2_append_batch_bytes_sum[5m]) / rate(s2_append_batch_bytes_count[5m])
+```
+
+### Example Grafana Panel
+
+```json
+{
+  "title": "Append Latency (P95)",
+  "targets": [
+    {
+      "expr": "histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m]))",
+      "legendFormat": "P95 Latency"
+    }
+  ],
+  "yaxes": [
+    {
+      "format": "s",
+      "label": "Latency"
+    }
+  ]
+}
+```
+
+## API Metrics (Cloud Only)
+
+<Warning>
+The `/metrics` API endpoint for basin and stream metrics is not supported in S2 Lite. These metrics are only available on the S2 cloud service.
+</Warning>
+
+For programmatic access to business metrics (storage, throughput, operations), use the S2 cloud service:
+
+```rust
+use s2_sdk::types::{
+    AccountMetricSet, BasinMetricSet, StreamMetricSet,
+    TimeRange, TimeRangeAndInterval, TimeseriesInterval,
+};
+
+// Account-level metrics
+let metrics = client.get_account_metrics(
+    GetAccountMetricsInput::new(
+        AccountMetricSet::AccountOps(time_range_and_interval(24, None))
+    )
+).await?;
+
+// Basin-level metrics  
+let metrics = client.get_basin_metrics(
+    GetBasinMetricsInput::new(
+        basin_name,
+        BasinMetricSet::AppendThroughput(time_range_and_interval(1, None))
+    )
+).await?;
+
+// Stream-level metrics
+let metrics = client.get_stream_metrics(
+    GetStreamMetricsInput::new(
+        basin_name,
+        stream_name,
+        StreamMetricSet::Storage(time_range(1))
+    )
+).await?;
+```
+
+## Alerting
+
+### Sample Prometheus Alerts
+
+```yaml
+groups:
+- name: s2-lite
+  interval: 30s
+  rules:
+  - alert: HighAppendLatency
+    expr: histogram_quantile(0.95, rate(s2_append_ack_latency_seconds_bucket[5m])) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High append latency detected"
+      description: "P95 append latency is {{ $value }}s (threshold: 1s)"
+  
+  - alert: S2LiteDown
+    expr: up{job="s2-lite"} == 0
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "S2 Lite instance is down"
+      description: "S2 Lite instance {{ $labels.instance }} has been down for 2 minutes"
+```
+
+## Logging
+
+S2 Lite outputs structured logs to stdout. Configure log level using the `RUST_LOG` environment variable:
+
+```bash
+# Info level (default)
+RUST_LOG=info s2 lite
+
+# Debug level for troubleshooting
+RUST_LOG=debug s2 lite
+
+# Specific module logging
+RUST_LOG=s2_lite=debug,slatedb=info s2 lite
+```
+
+<Tip>
+In production, set `RUST_LOG=info` or `RUST_LOG=warn` to reduce log volume.
+</Tip>
+
+## Performance Monitoring
+
+### SlateDB Configuration
+
+S2 Lite uses SlateDB as its storage engine. Configure SlateDB settings using `SL8_` prefixed environment variables:
+
+```bash
+# Flush interval (defaults to 50ms for remote, 5ms in-memory)
+export SL8_FLUSH_INTERVAL=10ms
+
+# Other SlateDB settings
+# See: https://docs.rs/slatedb/latest/slatedb/config/struct.Settings.html
+```
+
+<Note>
+Lower flush intervals improve write latency but may increase object storage API calls.
+</Note>
+
+## Monitoring Best Practices
+
+1. **Set up health checks** - Use `/health` for liveness and readiness probes
+2. **Monitor append latency** - Track P95 and P99 latency to detect performance degradation
+3. **Alert on downtime** - Configure alerts when S2 Lite becomes unavailable
+4. **Track batch sizes** - Understand your workload patterns
+5. **Use structured logging** - Enable JSON logging for better log aggregation
+6. **Monitor resource usage** - Track CPU, memory, and network metrics at the infrastructure level

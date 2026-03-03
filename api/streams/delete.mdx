@@ -1,0 +1,59 @@
+---
+title: 'Delete Stream'
+description: 'Delete a stream and all its records'
+api: 'DELETE /streams/{stream}'
+---
+
+## Overview
+
+Delete a stream and all its records. This operation is asynchronous and returns immediately. The stream will be marked for deletion and removed in the background.
+
+## Authentication
+
+This endpoint requires authentication via the `S2-Basin` header containing your basin name.
+
+## Path Parameters
+
+<ParamField path="stream" type="string" required>
+  The name of the stream to delete.
+  
+  Example: `logs/application`
+</ParamField>
+
+## Response
+
+Returns HTTP 202 Accepted on success. The stream is marked for deletion and will be removed asynchronously.
+
+No response body is returned.
+
+## Example Request
+
+```bash cURL
+curl -X DELETE 'https://{basin}.b.aws.s2.dev/v1/streams/logs%2Fapplication' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+<Note>
+  Stream names in the URL must be properly URL-encoded. For example, `logs/application` becomes `logs%2Fapplication`.
+</Note>
+
+## Example Response
+
+HTTP 202 Accepted with no body.
+
+## Error Responses
+
+- **404 Not Found** - Stream does not exist
+- **400 Bad Request** - Invalid stream name
+- **403 Forbidden** - Insufficient permissions to delete the stream
+
+## Important Notes
+
+<Warning>
+  Deletion is permanent and cannot be undone. All records in the stream will be deleted.
+</Warning>
+
+- The deletion happens asynchronously in the background
+- Once a stream is marked for deletion, it cannot be used for reads or writes
+- You can create a new stream with the same name after the deletion completes

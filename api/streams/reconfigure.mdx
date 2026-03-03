@@ -1,0 +1,163 @@
+---
+title: 'Reconfigure Stream'
+description: 'Update the configuration of an existing stream'
+api: 'PATCH /streams/{stream}/config'
+---
+
+## Overview
+
+Update the configuration of an existing stream. Only the specified fields will be updated; unspecified fields remain unchanged.
+
+This endpoint uses `PATCH` semantics, meaning you only need to include the fields you want to change.
+
+## Authentication
+
+This endpoint requires authentication via the `S2-Basin` header containing your basin name.
+
+## Path Parameters
+
+<ParamField path="stream" type="string" required>
+  The name of the stream to reconfigure.
+  
+  Example: `logs/application`
+</ParamField>
+
+## Request Body
+
+All fields are optional. Include only the fields you want to update.
+
+<ParamField body="storage_class" type="string">
+  Update the storage class:
+  - `standard` - Append tail latency under 400ms
+  - `express` - Append tail latency under 40ms
+</ParamField>
+
+<ParamField body="retention_policy" type="object">
+  Update the retention policy.
+  
+  Options:
+  - `{"age": <seconds>}` - Age in seconds for automatic trimming (must be > 0)
+  - `{"infinite": {}}` - Retain records unless explicitly trimmed
+</ParamField>
+
+<ParamField body="timestamping" type="object">
+  Update timestamping behavior. You can update individual fields within this object.
+  
+  <Expandable title="TimestampingReconfiguration">
+    <ParamField body="mode" type="string">
+      Update timestamping mode:
+      - `client-prefer` - Prefer client timestamp if present, otherwise use arrival time
+      - `client-require` - Require client timestamp, reject if missing
+      - `arrival` - Use arrival time, ignore client timestamp
+    </ParamField>
+    
+    <ParamField body="uncapped" type="boolean">
+      Update whether client timestamps can exceed arrival time.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="delete_on_empty" type="object">
+  Update automatic deletion configuration.
+  
+  <Expandable title="DeleteOnEmptyReconfiguration">
+    <ParamField body="min_age_secs" type="number">
+      Update minimum age in seconds before an empty stream can be deleted. Set to 0 to disable.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+Returns the complete updated stream configuration.
+
+<ResponseField name="storage_class" type="string">
+  Current storage class.
+</ResponseField>
+
+<ResponseField name="retention_policy" type="object">
+  Current retention policy.
+</ResponseField>
+
+<ResponseField name="timestamping" type="object">
+  Current timestamping configuration.
+</ResponseField>
+
+<ResponseField name="delete_on_empty" type="object">
+  Current delete-on-empty configuration.
+</ResponseField>
+
+## Example Requests
+
+### Update Storage Class Only
+
+```bash cURL
+curl -X PATCH 'https://{basin}.b.aws.s2.dev/v1/streams/logs%2Fapplication/config' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "storage_class": "express"
+  }'
+```
+
+### Update Retention Policy
+
+```bash cURL
+curl -X PATCH 'https://{basin}.b.aws.s2.dev/v1/streams/logs%2Fapplication/config' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "retention_policy": {
+      "age": 2592000
+    }
+  }'
+```
+
+### Update Multiple Settings
+
+```bash cURL
+curl -X PATCH 'https://{basin}.b.aws.s2.dev/v1/streams/logs%2Fapplication/config' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "storage_class": "express",
+    "timestamping": {
+      "mode": "arrival"
+    },
+    "delete_on_empty": {
+      "min_age_secs": 3600
+    }
+  }'
+```
+
+<Note>
+  Stream names in the URL must be properly URL-encoded. For example, `logs/application` becomes `logs%2Fapplication`.
+</Note>
+
+## Example Response
+
+```json
+{
+  "storage_class": "express",
+  "retention_policy": {
+    "age": 2592000
+  },
+  "timestamping": {
+    "mode": "arrival",
+    "uncapped": false
+  },
+  "delete_on_empty": {
+    "min_age_secs": 3600
+  }
+}
+```
+
+## Error Responses
+
+- **404 Not Found** - Stream does not exist
+- **400 Bad Request** - Invalid configuration (e.g., retention age of 0)
+- **403 Forbidden** - Insufficient permissions to reconfigure the stream
+- **409 Conflict** - Configuration conflict

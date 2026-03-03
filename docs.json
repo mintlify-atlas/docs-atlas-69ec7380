@@ -1,122 +1,172 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "S2",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#4F46E5",
+    "light": "#818CF8",
+    "dark": "#4338CA"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/s2-streamstore/s2"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/s2-streamstore/s2",
+      "discord": "https://discord.gg/vTCs7kMkAf"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/overview",
+              "concepts/basins",
+              "concepts/streams",
+              "concepts/records",
+              "concepts/durability"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "CLI",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "cli/overview",
+              "cli/configuration",
+              "cli/basins",
+              "cli/streams",
+              "cli/records",
+              "cli/interactive-mode",
+              "cli/benchmarking"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "S2 Lite",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "lite/overview",
+              "lite/quickstart",
+              "lite/deployment",
+              "lite/kubernetes",
+              "lite/monitoring",
+              "lite/configuration"
+            ]
+          },
+          {
+            "group": "SDKs",
+            "pages": [
+              "sdks/overview",
+              "sdks/rust",
+              "sdks/typescript",
+              "sdks/go",
+              "sdks/python",
+              "sdks/java"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "api/overview",
+              "api/authentication",
+              "api/s2s-protocol"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Basins",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/basins/list",
+              "api/basins/create",
+              "api/basins/delete",
+              "api/basins/get-config",
+              "api/basins/reconfigure"
+            ]
+          },
+          {
+            "group": "Streams",
+            "pages": [
+              "api/streams/list",
+              "api/streams/create",
+              "api/streams/delete",
+              "api/streams/get-config",
+              "api/streams/reconfigure"
+            ]
+          },
+          {
+            "group": "Records",
+            "pages": [
+              "api/records/append",
+              "api/records/read",
+              "api/records/read-session",
+              "api/records/check-tail"
+            ]
+          },
+          {
+            "group": "Access Tokens",
+            "pages": [
+              "api/access-tokens/list",
+              "api/access-tokens/issue",
+              "api/access-tokens/revoke"
+            ]
+          },
+          {
+            "group": "Metrics",
+            "pages": [
+              "api/metrics/account",
+              "api/metrics/basin",
+              "api/metrics/stream"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Usage Patterns",
+            "pages": [
+              "guides/streaming-sessions",
+              "guides/batching",
+              "guides/error-handling",
+              "guides/performance-tuning"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "guides/self-hosting/overview",
+              "guides/self-hosting/s3-setup",
+              "guides/self-hosting/production-deployment",
+              "guides/self-hosting/backup-restore"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "guides/integration/testing",
+              "guides/integration/monitoring",
+              "guides/integration/best-practices"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

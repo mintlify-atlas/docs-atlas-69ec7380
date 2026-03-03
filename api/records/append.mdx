@@ -1,0 +1,255 @@
+---
+title: 'Append Records'
+description: 'Append a batch of records to a stream'
+---
+
+## POST /streams/{stream}/records
+
+Append one or more records atomically to a stream. Records are assigned sequential sequence numbers and timestamps upon successful append.
+
+### Authentication
+
+Requires a valid access token with write permissions to the stream.
+
+### Path Parameters
+
+<ParamField path="stream" type="string" required>
+  Stream name to append records to. Must be between 1 and 512 bytes in length.
+</ParamField>
+
+### Headers
+
+<ParamField header="S2-Basin" type="string" required>
+  Basin name where the stream resides.
+</ParamField>
+
+<ParamField header="S2-Format" type="string" default="base64">
+  Encoding format for record headers and body. Options:
+  - `base64` - Base64-encoded binary data (default)
+  - `utf8` - UTF-8 text
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Request body format:
+  - `application/json` - JSON format
+  - `application/protobuf` - Protocol Buffers format
+  - `s2s/proto` - S2S streaming protocol for bi-directional append
+</ParamField>
+
+<ParamField header="Accept" type="string" default="application/json">
+  Response format:
+  - `application/json` - JSON response
+  - `application/protobuf` - Protobuf response
+</ParamField>
+
+### Request Body
+
+<ParamField body="records" type="array" required>
+  Batch of records to append atomically. Must contain at least 1 and no more than 1000 records. The total size may not exceed 1 MiB of metered bytes.
+  
+  <Expandable title="Record fields">
+    <ParamField body="timestamp" type="uint64">
+      Optional timestamp for this record in milliseconds since Unix epoch. The service ensures monotonicity by adjusting it up if necessary to the maximum observed timestamp. Refer to stream timestamping configuration for finer semantics.
+    </ParamField>
+    
+    <ParamField body="headers" type="array">
+      Optional array of name-value pairs for structured metadata.
+      
+      Each header is a two-element array: `["name", "value"]`
+      
+      Both name and value are encoded according to the `S2-Format` header (base64 or utf8).
+    </ParamField>
+    
+    <ParamField body="body" type="string">
+      Record body encoded according to the `S2-Format` header. Can be empty.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="match_seq_num" type="uint64">
+  Optional conditional append. Enforces that the sequence number assigned to the first record matches this value. If not, the append fails with `412 Precondition Failed`.
+</ParamField>
+
+<ParamField body="fencing_token" type="string">
+  Optional fencing token for mutual exclusion. Must match the token previously set by a `fence` command record. If not, the append fails with `412 Precondition Failed`.
+</ParamField>
+
+### Response
+
+<ResponseField name="start" type="object" required>
+  Position of the first appended record.
+  
+  <Expandable title="StreamPosition fields">
+    <ResponseField name="seq_num" type="uint64">
+      Sequence number assigned by the service.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp in milliseconds since Unix epoch.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="end" type="object" required>
+  Position after the last appended record (exclusive).
+  
+  The difference between `end.seq_num` and `start.seq_num` equals the number of records appended.
+  
+  <Expandable title="StreamPosition fields">
+    <ResponseField name="seq_num" type="uint64">
+      One past the last assigned sequence number.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp of the last appended record.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tail" type="object" required>
+  Current tail position of the stream.
+  
+  This can be greater than `end` if there were concurrent appends.
+  
+  <Expandable title="StreamPosition fields">
+    <ResponseField name="seq_num" type="uint64">
+      Next sequence number to be assigned.
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="uint64">
+      Timestamp of the last record on the stream.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Status Codes
+
+- `200 OK` - Records successfully appended
+- `400 Bad Request` - Invalid request (e.g., empty batch, records too large)
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Stream does not exist
+- `412 Precondition Failed` - Conditional append failed (returns condition failure details)
+- `408 Request Timeout` - Operation timed out
+- `409 Conflict` - Stream is being deleted
+
+## Examples
+
+### Append a single record
+
+```bash
+curl -X POST https://mybasin.b.aws.s2.dev/v1/streams/events/records \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: application/json" \
+  -H "S2-Format: utf8" \
+  -d '{
+    "records": [
+      {
+        "body": "Hello, S2!",
+        "headers": [["source", "api"]]
+      }
+    ]
+  }'
+```
+
+### Response
+
+```json
+{
+  "start": {
+    "seq_num": 100,
+    "timestamp": 1709481234567
+  },
+  "end": {
+    "seq_num": 101,
+    "timestamp": 1709481234567
+  },
+  "tail": {
+    "seq_num": 101,
+    "timestamp": 1709481234567
+  }
+}
+```
+
+### Append multiple records with base64 encoding
+
+```bash
+curl -X POST https://mybasin.b.aws.s2.dev/v1/streams/logs/records \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: application/json" \
+  -H "S2-Format: base64" \
+  -d '{
+    "records": [
+      {
+        "timestamp": 1709481234567,
+        "body": "SGVsbG8=",
+        "headers": [["dHlwZQ==", "aW5mbw=="]]
+      },
+      {
+        "timestamp": 1709481234568,
+        "body": "V29ybGQ="
+      }
+    ]
+  }'
+```
+
+### Conditional append with sequence number check
+
+```bash
+curl -X POST https://mybasin.b.aws.s2.dev/v1/streams/events/records \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [{"body": "dGVzdA=="}],
+    "match_seq_num": 100
+  }'
+```
+
+If the tail is not at seq_num 100, you'll receive:
+
+```json
+// 412 Precondition Failed
+{
+  "seq_num_mismatch": 105
+}
+```
+
+### Fenced append
+
+```bash
+curl -X POST https://mybasin.b.aws.s2.dev/v1/streams/events/records \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [{"body": "ZmVuY2Vk"}],
+    "fencing_token": "writer-123"
+  }'
+```
+
+## S2S Streaming Append
+
+For high-throughput scenarios, use the S2S protocol with bi-directional streaming:
+
+```bash
+curl -X POST https://mybasin.b.aws.s2.dev/v1/streams/events/records \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "S2-Basin: mybasin" \
+  -H "Content-Type: s2s/proto" \
+  -H "Accept-Encoding: zstd" \
+  --data-binary @append-frames.bin
+```
+
+The S2S protocol uses length-prefixed protobuf frames with optional compression (zstd or gzip). Each frame contains an `AppendInput` message, and responses stream back `AppendAck` messages.
+
+See [S2S Protocol](/api/s2s-protocol) for frame format details.
+
+## Notes
+
+- Records within a batch are appended atomically - either all succeed or all fail
+- Sequence numbers are strictly monotonic and have no gaps within a stream
+- Timestamps are monotonic but may have duplicates if client-specified
+- The total metered size includes headers and body but excludes protocol overhead
+- Empty records (no headers, no body) are valid but occupy a sequence number

@@ -1,0 +1,428 @@
+---
+title: Records
+description: Understanding record structure, types, and data format in S2
+---
+
+Records are the fundamental unit of data in S2. Each record is an immutable data item with headers and a body, stored in an ordered stream.
+
+## Record structure
+
+Every record has three main components:
+
+```rust
+pub struct SequencedRecord {
+    pub position: StreamPosition,  // seq_num + timestamp
+    pub record: Record,            // The actual data
+}
+```
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:261-265`:
+
+### Position
+
+The position identifies where the record is in the stream:
+
+```json
+{
+  "seq_num": 42,
+  "timestamp": 1709481600000
+}
+```
+
+- **seq_num**: Unique sequence number (0-based, incrementing)
+- **timestamp**: Unix timestamp in milliseconds
+
+### Headers
+
+A list of name-value pairs (both are binary data):
+
+```json
+{
+  "headers": [
+    {"name": "content-type", "value": "application/json"},
+    {"name": "user-id", "value": "123"}
+  ]
+}
+```
+
+- Names must not be empty (except for command records)
+- Both names and values are arbitrary bytes
+- Headers contribute to metered size and storage
+
+### Body
+
+Arbitrary binary data representing the record's payload:
+
+```json
+{
+  "body": "SGVsbG8sIFdvcmxkIQ=="  // Base64-encoded binary
+}
+```
+
+## Record types
+
+S2 supports two types of records:
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:79-84`:
+
+```rust
+pub enum RecordType {
+    Command = 1,
+    Envelope = 2,
+}
+```
+
+### Envelope records
+
+**Envelope records** are the standard record type for application data:
+
+- Contain zero or more headers with non-empty names
+- Contain a body with arbitrary data
+- Used for storing events, messages, logs, etc.
+
+```json
+{
+  "seq_num": 100,
+  "timestamp": 1709481600000,
+  "headers": [
+    {"name": "event-type", "value": "user.created"},
+    {"name": "trace-id", "value": "abc123"}
+  ],
+  "body": "eyJ1c2VyX2lkIjoxMjN9"  // {"user_id":123}
+}
+```
+
+### Command records
+
+**Command records** are special control records that affect stream behavior:
+
+- Have exactly one header with an empty name
+- The header value identifies the command type
+- The body contains the command payload
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:166-180`:
+
+#### Fence command
+
+Sets a fencing token for conditional writes:
+
+```json
+{
+  "headers": [{"name": "", "value": "fence"}],
+  "body": "bXktdW5pcXVlLXRva2Vu"  // "my-unique-token"
+}
+```
+
+Fencing tokens:
+- Must be ≤ 48 bytes in length
+- Start as an empty string by default
+- Can be any arbitrary bytes
+- Enable exactly-once semantics
+
+From `/home/daytona/workspace/source/common/src/record/fencing.rs`:
+
+```rust
+pub const MAX_FENCING_TOKEN_LENGTH: usize = 48;
+```
+
+#### Trim command
+
+Marks a trim point in the stream:
+
+```json
+{
+  "headers": [{"name": "", "value": "trim"}],
+  "body": "AAAAAAAAAGY="  // SeqNum: 100 (8 bytes, big-endian)
+}
+```
+
+- Body must be exactly 8 bytes (u64 sequence number)
+- Records before the trim point become unreadable
+- The trim point itself can never be trimmed
+- Used for implementing retention policies
+
+From `/home/daytona/workspace/source/lite/src/backend/streamer.rs:210-232`:
+
+<Warning>
+Trimming is irreversible. Once records are trimmed, they cannot be recovered.
+</Warning>
+
+## Data encoding formats
+
+Records can be represented in two formats when transmitted over the API:
+
+From `/home/daytona/workspace/source/api/src/data.rs:42-48`:
+
+```rust
+pub enum Format {
+    Raw,      // UTF-8 strings
+    Base64,   // Base64-encoded binary
+}
+```
+
+### Raw format (default)
+
+- Header names, values, and body are represented as UTF-8 strings
+- Efficient for text data
+- Storage is in UTF-8 encoding
+
+```json
+{
+  "headers": [
+    {"name": "content-type", "value": "text/plain"}
+  ],
+  "body": "Hello, World!"
+}
+```
+
+### Base64 format
+
+- Header names, values, and body are Base64-encoded
+- Safe for binary data transmission
+- Efficient storage of binary data (stored as original bytes)
+
+```json
+{
+  "headers": [
+    {"name": "Y29udGVudC10eXBl", "value": "aW1hZ2UvcG5n"}
+  ],
+  "body": "iVBORw0KGgoAAAANSUhEUgAAAAUA..."
+}
+```
+
+Specify format using the `S2-Format` header:
+
+```bash
+curl https://api.s2.dev/streams/my-stream/records \
+  -H "S2-Basin: my-basin" \
+  -H "S2-Format: base64"
+```
+
+## Metered size
+
+Each record has a **metered size** that determines:
+
+- Billing (for s2.dev)
+- Batch limits (max 1 MiB per batch)
+- Storage tracking
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:114-125`:
+
+```rust
+impl MeteredSize for Record {
+    fn metered_size(&self) -> usize {
+        8 + (match self {
+            Record::Command(command) => 
+                2 + command.op().to_id().len() + command.payload().len(),
+            Record::Envelope(envelope) => 
+                (2 * envelope.headers().len())
+                + envelope.headers().deep_size()
+                + envelope.body().len()
+        })
+    }
+}
+```
+
+Metered size includes:
+- **8 bytes** overhead per record
+- **2 bytes** per header (delimiter overhead)
+- **Header deep size**: Sum of all header name and value lengths
+- **Body length**: Size of the body in bytes
+
+<Info>
+Metered size is calculated on the raw bytes, not the Base64-encoded representation.
+</Info>
+
+## Record encoding
+
+Records are stored in a compact binary format:
+
+### Magic byte
+
+The first byte encodes the record type and metered size length:
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:86-90`:
+
+```rust
+pub struct MagicByte {
+    pub record_type: RecordType,      // 3 bits
+    pub metered_size_varlen: u8,      // 2 bits (1-3 bytes)
+}
+```
+
+- Bits 0-2: Record type (1=Command, 2=Envelope)
+- Bits 3-4: Metered size variable length (0=1 byte, 1=2 bytes, 2=3 bytes)
+
+### Wire format
+
+```
++-------------+------------------+------------------+
+| Magic Byte  | Metered Size     | Record Data      |
+| (1 byte)    | (1-3 bytes)      | (variable)       |
++-------------+------------------+------------------+
+```
+
+Record data for envelope records:
+```
++----------------+------------------+-------------+
+| Header Count   | Headers          | Body        |
+| (2 bytes)      | (variable)       | (variable)  |
++----------------+------------------+-------------+
+```
+
+Each header:
+```
++-------------+-------------+-------------+-------------+
+| Name Length | Name        | Value Length| Value       |
+| (2 bytes)   | (variable)  | (2 bytes)   | (variable)  |
++-------------+-------------+-------------+-------------+
+```
+
+## Appending records
+
+Records are appended in batches:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.s2.dev/streams/my-stream/records \
+  -H "S2-Basin: my-basin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [
+      {
+        "timestamp": 1709481600000,
+        "headers": [
+          {"name": "event-type", "value": "order.created"}
+        ],
+        "body": "eyJvcmRlcl9pZCI6MTIzfQ=="
+      }
+    ]
+  }'
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::AppendRecordsBatchInput};
+use bytes::Bytes;
+
+let record = AppendRecord::new()
+    .header("event-type", "order.created")
+    .body(Bytes::from(r#"{"order_id":123}"#));
+
+let input = AppendRecordsBatchInput::new(
+    "my-basin".parse()?,
+    "my-stream".parse()?,
+    vec![record]
+);
+
+let ack = s2.append_records(input).await?;
+println!("Appended at seq_num: {}", ack.start.seq_num);
+```
+</CodeGroup>
+
+Response:
+```json
+{
+  "start": {"seq_num": 100, "timestamp": 1709481600000},
+  "end": {"seq_num": 101, "timestamp": 1709481600000},
+  "tail": {"seq_num": 101, "timestamp": 1709481600000}
+}
+```
+
+### Batch constraints
+
+From `/home/daytona/workspace/source/api/src/v1/stream/mod.rs:363-367`:
+
+- **Minimum**: 1 record per batch
+- **Maximum**: 1000 records per batch
+- **Size limit**: Total metered size ≤ 1 MiB per batch
+
+### Append options
+
+**timestamp** (optional):
+- Client-provided timestamp in milliseconds
+- Behavior depends on stream timestamping configuration
+- Server enforces monotonicity
+
+**match_seq_num** (optional):
+- Enforce that first record gets this sequence number
+- Fails with `seq-num-mismatch` if tail has moved
+- Enables optimistic concurrency control
+
+**fencing_token** (optional):
+- Enforce the current fencing token matches
+- Fails with `fencing-token-mismatch` if token differs
+- Enables exactly-once semantics
+
+From `/home/daytona/workspace/source/api/src/v1/stream/mod.rs:360-372`:
+
+## Reading records
+
+<CodeGroup>
+```bash cURL
+curl https://api.s2.dev/streams/my-stream/records?seq_num=100&count=10 \
+  -H "S2-Basin: my-basin"
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::ReadRecordsInput};
+
+let input = ReadRecordsInput::new(
+    "my-basin".parse()?,
+    "my-stream".parse()?
+).seq_num(100).count(10);
+
+let batch = s2.read_records(input).await?;
+for record in batch.records {
+    println!("seq={} ts={}", record.seq_num, record.timestamp);
+}
+```
+</CodeGroup>
+
+Response:
+```json
+{
+  "records": [
+    {
+      "seq_num": 100,
+      "timestamp": 1709481600000,
+      "headers": [
+        {"name": "event-type", "value": "order.created"}
+      ],
+      "body": "eyJvcmRlcl9pZCI6MTIzfQ=="
+    }
+  ],
+  "tail": {"seq_num": 150, "timestamp": 1709482000000}
+}
+```
+
+## Record validation
+
+Records are validated on append:
+
+From `/home/daytona/workspace/source/common/src/record/mod.rs:167-180`:
+
+- Headers with empty names are only allowed for command records
+- Command records must have exactly one header
+- Fencing tokens must be ≤ 48 bytes
+- Trim points must be 8 bytes (u64)
+- Total batch size must be ≤ 1 MiB metered bytes
+
+## Best practices
+
+1. **Use headers for metadata**: Store searchable metadata in headers
+2. **Choose appropriate format**: Use raw for text, base64 for binary
+3. **Batch appends**: Send multiple records per request for better throughput
+4. **Include timestamps**: Provide client timestamps when event time matters
+5. **Leverage fencing**: Use fencing tokens for exactly-once critical operations
+6. **Monitor metered size**: Large records impact performance and costs
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Durability" icon="shield" href="/concepts/durability">
+    Learn about durability guarantees
+  </Card>
+  <Card title="Reading records" icon="book-open" href="/api/records/read">
+    Explore record read API
+  </Card>
+</CardGroup>

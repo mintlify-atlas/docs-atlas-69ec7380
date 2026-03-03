@@ -1,0 +1,391 @@
+---
+title: 'Authentication'
+description: 'Authenticate API requests using access tokens'
+---
+
+## Overview
+
+All S2 API requests require authentication using **Bearer tokens** in the `Authorization` header. Access tokens are managed through the S2 account API and can be scoped to specific resources and operations.
+
+## Access Tokens
+
+Access tokens are string credentials that authenticate your API requests. They are:
+
+- **Hierarchical** - Root tokens can create scoped child tokens
+- **Scoped** - Restrict access to specific basins, streams, or operations
+- **Expirable** - Optional expiration time for security
+- **Revocable** - Can be revoked at any time
+
+## Authentication Header
+
+Include your access token in the `Authorization` header:
+
+```bash
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+### Example Request
+
+```bash
+curl https://account.s2.dev/v1/basins \
+  -H "Authorization: Bearer s2_ak_1234567890abcdef"
+```
+
+## Getting Your First Token
+
+For S2.dev (managed service):
+
+1. Sign up at [s2.dev](https://s2.dev)
+2. Your initial root token is provided in the dashboard
+3. Export it as an environment variable:
+
+```bash
+export S2_ACCESS_TOKEN="s2_ak_your_token_here"
+```
+
+<Warning>
+Store your root token securely. It has full access to your account. Consider using a secrets manager in production.
+</Warning>
+
+For S2 Lite (self-hosted):
+
+```bash
+# S2 Lite does not require authentication by default
+export S2_ACCESS_TOKEN="ignored"
+```
+
+## Creating Scoped Tokens
+
+Create child tokens with restricted permissions using the access tokens API.
+
+### Issue a Token
+
+```bash
+curl -X POST https://account.s2.dev/v1/access-tokens \
+  -H "Authorization: Bearer YOUR_ROOT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "read-only-token",
+    "scope": {
+      "basins": {"prefix": "prod-"},
+      "streams": {"prefix": ""},
+      "op_groups": {
+        "stream": {"read": true, "write": false}
+      }
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "access_token": "s2_ak_scoped_token_here"
+}
+```
+
+<Note>
+The full token value is only returned when created. Store it securely as it cannot be retrieved later.
+</Note>
+
+## Token Scope
+
+Control what a token can access using scope configuration.
+
+### Resource Scoping
+
+Restrict access to specific resources:
+
+#### Exact Match
+
+Allow access to a single resource:
+
+```json
+{
+  "basins": {"exact": "production-basin"},
+  "streams": {"exact": "critical-stream"}
+}
+```
+
+#### Prefix Match  
+
+Allow access to resources starting with a prefix:
+
+```json
+{
+  "basins": {"prefix": "prod-"},
+  "streams": {"prefix": "logs-"}
+}
+```
+
+#### All Resources
+
+Use empty prefix to allow all:
+
+```json
+{
+  "basins": {"prefix": ""},
+  "streams": {"prefix": ""}
+}
+```
+
+#### No Access
+
+Use empty exact match to deny all:
+
+```json
+{
+  "basins": {"exact": ""},
+  "access_tokens": {"exact": ""}
+}
+```
+
+### Operation Scoping
+
+Control what operations a token can perform.
+
+#### Operation Groups
+
+Grant read and/or write permissions at different levels:
+
+```json
+{
+  "op_groups": {
+    "account": {"read": true, "write": false},
+    "basin": {"read": true, "write": true},
+    "stream": {"read": true, "write": false}
+  }
+}
+```
+
+**Permission levels:**
+
+- **Account**: List basins, access tokens, account metrics
+- **Basin**: Create/delete basins, configure basin settings, basin metrics
+- **Stream**: Create/delete streams, append/read records, stream metrics
+
+#### Specific Operations
+
+Grant access to individual operations:
+
+```json
+{
+  "ops": [
+    "list-basins",
+    "list-streams",
+    "read",
+    "append"
+  ]
+}
+```
+
+**Available operations:**
+
+- Account: `list-basins`, `create-basin`, `delete-basin`, `reconfigure-basin`, `get-basin-config`, `issue-access-token`, `revoke-access-token`, `list-access-tokens`, `account-metrics`
+- Basin: `basin-metrics`  
+- Stream: `list-streams`, `create-stream`, `delete-stream`, `get-stream-config`, `reconfigure-stream`, `check-tail`, `append`, `read`, `trim`, `fence`, `stream-metrics`
+
+<Info>
+Operation permissions are the union of `op_groups` and `ops`. A token is granted access if either allows the operation.
+</Info>
+
+### Auto-Prefixing Streams
+
+Automatic stream name prefixing provides namespace isolation:
+
+```json
+{
+  "id": "service-a-token",
+  "auto_prefix_streams": true,
+  "scope": {
+    "streams": {"prefix": "service-a/"}
+  }
+}
+```
+
+With auto-prefixing enabled:
+
+- Token can only access streams starting with `service-a/`
+- Stream names in requests are automatically prefixed with `service-a/`
+- Stream names in responses have the prefix stripped
+
+This allows different services to use the same stream names without conflicts.
+
+## Token Expiration
+
+Set an expiration time when creating tokens:
+
+```json
+{
+  "id": "temporary-token",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "scope": {...}
+}
+```
+
+<Warning>
+Expired tokens return `401 Unauthorized`. Create new tokens before expiration or use tokens without expiration for long-lived services.
+</Warning>
+
+If `expires_at` is not specified, the token inherits the expiration of the parent token used to create it.
+
+## Managing Tokens
+
+### List Tokens
+
+Retrieve metadata about existing tokens (not the secret values):
+
+```bash
+curl https://account.s2.dev/v1/access-tokens \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "access_tokens": [
+    {
+      "id": "read-only-token",
+      "expires_at": "2027-01-01T00:00:00Z",
+      "auto_prefix_streams": false,
+      "scope": {...}
+    }
+  ],
+  "has_more": false
+}
+```
+
+### Revoke a Token
+
+Revoke a token to immediately invalidate it:
+
+```bash
+curl -X DELETE https://account.s2.dev/v1/access-tokens/read-only-token \
+  -H "Authorization: Bearer YOUR_ROOT_TOKEN"
+```
+
+<Note>
+Revoking a token also revokes all child tokens created from it.
+</Note>
+
+## Security Best Practices
+
+### 1. Use Scoped Tokens
+
+Create tokens with minimal required permissions:
+
+```json
+{
+  "id": "analytics-reader",
+  "scope": {
+    "basins": {"exact": "analytics"},
+    "streams": {"prefix": ""},
+    "op_groups": {
+      "stream": {"read": true, "write": false}
+    }
+  }
+}
+```
+
+### 2. Rotate Tokens Regularly
+
+Periodically create new tokens and revoke old ones:
+
+```bash
+# Create new token with expiration
+curl -X POST https://account.s2.dev/v1/access-tokens \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "id": "service-token-2026-03",
+    "expires_at": "2026-04-01T00:00:00Z",
+    "scope": {...}
+  }'
+
+# Revoke old token after transitioning
+curl -X DELETE https://account.s2.dev/v1/access-tokens/service-token-2026-02 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 3. Use Environment Variables
+
+Never hardcode tokens in source code:
+
+```bash
+# Good
+export S2_ACCESS_TOKEN="s2_ak_..."
+
+# Bad - DO NOT DO THIS
+const token = "s2_ak_..."; // hardcoded token
+```
+
+### 4. Limit Token Scope by Service
+
+Create separate tokens for each service or environment:
+
+```json
+{
+  "id": "production-api-server",
+  "scope": {
+    "basins": {"exact": "production"},
+    "op_groups": {
+      "stream": {"read": true, "write": true}
+    }
+  }
+}
+```
+
+## Error Responses
+
+### 401 Unauthorized
+
+Missing or invalid token:
+
+```json
+{
+  "error": "unauthorized",
+  "message": "Invalid or expired access token"
+}
+```
+
+### 403 Forbidden
+
+Token lacks required permissions:
+
+```json
+{
+  "error": "forbidden",  
+  "message": "Token does not have permission for this operation"
+}
+```
+
+## SDK Support
+
+S2 SDKs handle authentication automatically:
+
+### Rust SDK
+
+```rust
+use s2::Client;
+
+let client = Client::from_env()?;
+// Token read from S2_ACCESS_TOKEN environment variable
+```
+
+### CLI
+
+```bash
+export S2_ACCESS_TOKEN="your_token"
+s2 list-basins
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Overview" icon="book" href="/api/overview">
+    Learn about API structure and endpoints
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get started with S2 in minutes
+  </Card>
+</CardGroup>

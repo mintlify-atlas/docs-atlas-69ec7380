@@ -1,0 +1,38 @@
+---
+title: Delete Basin
+api: DELETE /basins/{basin}
+---
+
+Delete a basin. The deletion is asynchronous and the basin will enter the `deleting` state.
+
+## Path Parameters
+
+<ParamField path="basin" type="string" required>
+  Basin name.
+</ParamField>
+
+## Response
+
+Returns `202 Accepted` status code with no body on successful deletion request.
+
+The basin enters the `deleting` state and will be removed once all contained streams are deleted.
+
+## Example
+
+```bash
+curl -X DELETE "https://aws.s2.dev/v1/basins/my-basin" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Response (202 Accepted)
+
+```
+HTTP/1.1 202 Accepted
+```
+
+## Error Responses
+
+- `404 Not Found` - Basin does not exist
+- `400 Bad Request` - Invalid basin name
+- `403 Forbidden` - Insufficient permissions
+- `408 Request Timeout` - Request timed out

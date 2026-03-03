@@ -1,0 +1,399 @@
+---
+title: Benchmarking
+description: Measure stream performance with the S2 CLI benchmark tool
+---
+
+The S2 CLI includes a built-in benchmarking tool to measure write and read throughput, latency, and data integrity.
+
+## Overview
+
+The `bench` command:
+
+1. Creates a temporary stream in the specified basin
+2. Writes records at a target throughput for a specified duration
+3. Simultaneously reads records to measure live read performance
+4. Waits, then performs a catchup read to measure historical read performance
+5. Verifies data integrity using hash chains
+6. Reports detailed statistics
+7. Deletes the temporary stream
+
+## Basic usage
+
+Run a benchmark on a basin:
+
+```bash
+s2 bench my-basin
+```
+
+This runs a default benchmark:
+- Record size: 8 KiB
+- Target throughput: 1 MiB/s
+- Duration: 60 seconds
+- Catchup delay: 20 seconds
+
+## Customize benchmark parameters
+
+### Record size
+
+Set the metered record size (includes headers and overhead):
+
+```bash
+s2 bench my-basin --record-size 4096   # 4 KiB records
+s2 bench my-basin -b 16384             # 16 KiB records
+```
+
+Valid range: 128 bytes to 1 MiB (1048576 bytes)
+
+### Target throughput
+
+Set target write throughput in MiB/s:
+
+```bash
+s2 bench my-basin --target-mibps 10    # 10 MiB/s
+s2 bench my-basin -t 50                # 50 MiB/s
+```
+
+### Duration
+
+Set how long to run the write workload:
+
+```bash
+s2 bench my-basin --duration 120s      # 2 minutes
+s2 bench my-basin -d 5m                # 5 minutes
+```
+
+Supported units: `s` (seconds), `m` (minutes), `h` (hours)
+
+### Catchup delay
+
+Set delay before starting the catchup read:
+
+```bash
+s2 bench my-basin --catchup-delay 30s
+s2 bench my-basin -w 1m
+```
+
+Longer delays test how well the system handles reading older data.
+
+### Storage class
+
+Specify the storage class for the test stream:
+
+```bash
+s2 bench my-basin --storage-class express
+s2 bench my-basin -c standard
+```
+
+If not specified, uses the basin's default storage class.
+
+## Example benchmarks
+
+### High-throughput test
+
+```bash
+s2 bench my-basin \
+  --record-size 65536 \
+  --target-mibps 100 \
+  --duration 300s \
+  --storage-class express
+```
+
+Tests 100 MiB/s with 64 KiB records for 5 minutes on express storage.
+
+### Low-latency test
+
+```bash
+s2 bench my-basin \
+  --record-size 1024 \
+  --target-mibps 1 \
+  --duration 60s \
+  --storage-class express
+```
+
+Tests small records (1 KiB) on express storage to measure latency.
+
+### Standard storage test
+
+```bash
+s2 bench my-basin \
+  --record-size 8192 \
+  --target-mibps 10 \
+  --duration 120s \
+  --storage-class standard
+```
+
+Tests standard storage throughput and latency.
+
+## Understanding benchmark output
+
+During the benchmark, you'll see real-time progress:
+
+```
+Creating temporary stream s2://my-basin/bench/550e8400-e29b-41d4-a716-446655440000 (storage class: express)
+Running for 60s targeting 10 MiB/s with 8192 byte records, Ctrl+C to end early
+
+write       10.23 MiB/s     1280 rec/s |   614400000 bytes |       75000 records
+read        10.21 MiB/s     1277 rec/s |   613752000 bytes |       74930 records
+```
+
+After completion, detailed statistics are shown:
+
+```
+Write: 10.15 MiB/s, 1269 records/s (614400000 bytes, 75000 records in 57.73s)
+Read: 10.12 MiB/s, 1267 records/s (614400000 bytes, 75000 records in 57.89s)
+
+Ack Latency Statistics
+min    :      12 ms │ ⠸⠸⠸⠸⠸⠸
+median :      18 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸
+p90    :      25 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+p99    :      42 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+max    :      89 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+
+End-to-End Latency Statistics
+min    :      15 ms │ ⠸⠸⠸⠸⠸⠸⠸
+median :      22 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+p90    :      31 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+p99    :      55 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+max    :     105 ms │ ⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸⠸
+
+Waiting 20s before catchup read...
+
+catchup    102.45 MiB/s    12806 rec/s (614400000 bytes, 75000 records in 5.72s)
+```
+
+## Metrics explained
+
+### Throughput
+
+- **MiB/s** - Megabytes per second (1 MiB = 1,048,576 bytes)
+- **rec/s** - Records per second
+
+### Latency
+
+**Ack Latency** - Time from submitting a record to receiving acknowledgment from S2.
+- Lower is better for write operations
+- Measures write path performance
+
+**End-to-End Latency** - Time from when a record is written (with client timestamp) to when it's read.
+- Lower is better for real-time applications
+- Measures total system latency
+
+### Statistics
+
+- **min** - Minimum latency observed
+- **median** - 50th percentile (half of requests faster)
+- **p90** - 90th percentile (90% of requests faster)
+- **p99** - 99th percentile (99% of requests faster)
+- **max** - Maximum latency observed
+
+### Catchup read
+
+After the write workload completes, the benchmark waits (default 20s), then performs a catchup read:
+- Tests how quickly historical data can be read
+- Verifies all written records are readable
+- Often shows higher throughput than live reads
+
+## Data integrity verification
+
+The benchmark verifies data integrity using:
+
+1. **Hash chains** - Each record's hash depends on the previous record
+2. **Record counting** - Ensures all written records are read back
+3. **Body validation** - Verifies record body size matches expected
+
+If verification fails, the benchmark reports an error:
+
+```
+Error: Benchmark verification: unexpected record hash at seq_num 12345
+```
+
+This indicates a potential data corruption issue.
+
+## Rate limiting
+
+The benchmark implements time-based rate limiting to achieve the target throughput:
+
+- Calculates expected bytes submitted vs. time elapsed
+- Throttles writes to match target MiB/s
+- Accounts for network latency and batching
+
+Actual throughput may exceed target briefly due to batching, but averages to the target over time.
+
+## Early termination
+
+Press **Ctrl+C** to stop the benchmark early:
+
+```
+■ [ABORTED]
+```
+
+The benchmark will:
+1. Stop writing new records
+2. Wait for pending acks
+3. Verify records written so far
+4. Delete the temporary stream
+
+## Temporary stream naming
+
+The benchmark creates a stream with the pattern:
+
+```
+bench/{uuid}
+```
+
+Example: `s2://my-basin/bench/550e8400-e29b-41d4-a716-446655440000`
+
+The stream is configured with:
+- Retention: 1 hour
+- Delete on empty: 60 seconds after becoming empty
+- Timestamping: Client-required, uncapped
+
+## Common benchmark scenarios
+
+### Baseline performance
+
+Establish baseline metrics for your basin:
+
+```bash
+s2 bench my-basin --duration 300s --storage-class standard > baseline-standard.txt
+s2 bench my-basin --duration 300s --storage-class express > baseline-express.txt
+```
+
+### Compare storage classes
+
+```bash
+# Standard storage
+s2 bench my-basin -c standard -t 10 -d 120s
+
+# Express storage
+s2 bench my-basin -c express -t 10 -d 120s
+```
+
+Compare latency statistics to see the difference.
+
+### Stress test
+
+Test maximum sustainable throughput:
+
+```bash
+s2 bench my-basin \
+  --record-size 65536 \
+  --target-mibps 200 \
+  --duration 600s \
+  --storage-class express
+```
+
+Increase `--target-mibps` until you see increased latency or errors.
+
+### Latency characterization
+
+Measure latency at different throughput levels:
+
+```bash
+for THROUGHPUT in 1 5 10 50 100; do
+  echo "Testing $THROUGHPUT MiB/s"
+  s2 bench my-basin -t $THROUGHPUT -d 60s -c express > bench-${THROUGHPUT}mbps.txt
+done
+```
+
+Analyze p99 latency across different throughput levels.
+
+## Benchmark best practices
+
+### Run for sufficient duration
+
+Run benchmarks for at least 60 seconds to:
+- Allow the system to reach steady state
+- Collect sufficient samples for accurate statistics
+- Average out transient network issues
+
+### Multiple runs
+
+Run benchmarks multiple times and average results:
+
+```bash
+for i in {1..5}; do
+  echo "Run $i"
+  s2 bench my-basin -d 120s >> bench-results.txt
+  sleep 30
+done
+```
+
+### Consider time of day
+
+Network conditions vary. Run benchmarks:
+- At different times of day
+- During peak and off-peak hours
+- From different geographic locations
+
+### Match production workload
+
+Configure benchmark parameters to match your production use case:
+
+```bash
+# If your app writes 16 KiB records at 5 MiB/s:
+s2 bench prod-basin --record-size 16384 --target-mibps 5
+```
+
+## Troubleshooting
+
+### Throughput below target
+
+If actual throughput is significantly below target:
+
+1. Check network bandwidth
+2. Enable compression: `s2 config set compression zstd`
+3. Try larger record sizes (reduces per-record overhead)
+
+### High latency
+
+If latency is higher than expected:
+
+1. Try express storage class
+2. Check network latency to S2 endpoints
+3. Run benchmark during off-peak hours
+
+### Verification errors
+
+If you see data integrity errors:
+
+1. Re-run the benchmark
+2. Check for network issues
+3. Contact S2 support if errors persist
+
+### Out of memory
+
+For very high throughput tests:
+
+```bash
+# Reduce record size
+s2 bench my-basin -b 4096 -t 100
+```
+
+Smaller records use less memory for buffering.
+
+## Interpreting results
+
+### Good performance indicators
+
+- Write throughput matches target ±5%
+- Live read throughput close to write throughput
+- Catchup read throughput significantly higher than live read
+- p99 latency < 100ms for express storage
+- p99 latency < 500ms for standard storage
+- Max latency < 2x p99 latency
+
+### Performance tuning
+
+If results don't meet expectations:
+
+1. **Enable compression** (if not already):
+   ```bash
+   s2 config set compression zstd
+   ```
+
+2. **Use express storage** for latency-sensitive workloads
+
+3. **Optimize record size** - Larger records improve throughput efficiency
+
+4. **Batch writes** in your application (CLI does this automatically)

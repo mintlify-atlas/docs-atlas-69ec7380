@@ -1,0 +1,101 @@
+---
+title: Get Basin Config
+api: GET /basins/{basin}
+---
+
+Get the configuration for a basin.
+
+## Path Parameters
+
+<ParamField path="basin" type="string" required>
+  Basin name.
+</ParamField>
+
+## Response
+
+<ResponseField name="default_stream_config" type="object">
+  Default stream configuration.
+  
+  <Expandable title="StreamConfig">
+    <ResponseField name="storage_class" type="string">
+      Storage class for recent writes.
+      - `standard` - Append tail latency under 400 milliseconds
+      - `express` - Append tail latency under 40 milliseconds
+    </ResponseField>
+    
+    <ResponseField name="retention_policy" type="object">
+      Retention policy for the stream.
+      - `{"age": <seconds>}` - Age in seconds for automatic trimming
+      - `{"infinite": {}}` - Retain records unless explicitly trimmed
+    </ResponseField>
+    
+    <ResponseField name="timestamping" type="object">
+      Timestamping behavior.
+      
+      <Expandable title="TimestampingConfig">
+        <ResponseField name="mode" type="string">
+          Timestamping mode:
+          - `client-prefer` - Prefer client-specified timestamp if present otherwise use arrival time
+          - `client-require` - Require a client-specified timestamp
+          - `arrival` - Use arrival time and ignore client-specified timestamp
+        </ResponseField>
+        
+        <ResponseField name="uncapped" type="boolean">
+          Allow client-specified timestamps to exceed the arrival time.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="delete_on_empty" type="object">
+      Delete-on-empty configuration.
+      
+      <Expandable title="DeleteOnEmptyConfig">
+        <ResponseField name="min_age_secs" type="number">
+          Minimum age in seconds before an empty stream can be deleted.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="create_stream_on_append" type="boolean">
+  Create stream on append if it doesn't exist.
+</ResponseField>
+
+<ResponseField name="create_stream_on_read" type="boolean">
+  Create stream on read if it doesn't exist.
+</ResponseField>
+
+## Example
+
+```bash
+curl -X GET "https://aws.s2.dev/v1/basins/my-basin" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Response
+
+```json
+{
+  "default_stream_config": {
+    "storage_class": "standard",
+    "retention_policy": {"age": 604800},
+    "timestamping": {
+      "mode": "client-prefer",
+      "uncapped": false
+    },
+    "delete_on_empty": {
+      "min_age_secs": 0
+    }
+  },
+  "create_stream_on_append": true,
+  "create_stream_on_read": false
+}
+```
+
+## Error Responses
+
+- `404 Not Found` - Basin does not exist
+- `400 Bad Request` - Invalid basin name
+- `403 Forbidden` - Insufficient permissions
+- `408 Request Timeout` - Request timed out

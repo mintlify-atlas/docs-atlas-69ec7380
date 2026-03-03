@@ -1,0 +1,252 @@
+---
+title: CLI configuration
+description: Configure authentication, endpoints, and CLI settings
+---
+
+The S2 CLI stores configuration in a TOML file and supports environment variable overrides.
+
+## Configuration file location
+
+**Linux/macOS:**
+```
+~/.config/s2/config.toml
+```
+
+**Windows:**
+```
+%APPDATA%\s2\config.toml
+```
+
+## Managing configuration
+
+### Set a value
+
+```bash
+s2 config set <key> <value>
+```
+
+Example:
+```bash
+s2 config set access_token YOUR_ACCESS_TOKEN
+```
+
+### Get a value
+
+```bash
+s2 config get <key>
+```
+
+Example:
+```bash
+s2 config get access_token
+```
+
+### List all values
+
+```bash
+s2 config list
+```
+
+Output:
+```
+access_token = s2_abc123...
+compression = zstd
+ssl_no_verify = false
+```
+
+### Unset a value
+
+```bash
+s2 config unset <key>
+```
+
+Example:
+```bash
+s2 config unset compression
+```
+
+## Configuration keys
+
+### access_token
+
+**Required.** Your S2 access token for authentication.
+
+```bash
+s2 config set access_token s2_abc123xyz...
+```
+
+Without an access token, most CLI commands will fail. You can obtain an access token from the S2 console or by using the `issue-access-token` command with a parent token.
+
+### account_endpoint
+
+Custom account API endpoint URL. Must be set together with `basin_endpoint`.
+
+```bash
+s2 config set account_endpoint https://account.s2.example.com
+```
+
+<Note>
+Both `account_endpoint` and `basin_endpoint` must be set to use custom endpoints. If only one is set, the CLI will fall back to default endpoints.
+</Note>
+
+### basin_endpoint
+
+Custom basin API endpoint URL. Must be set together with `account_endpoint`.
+
+```bash
+s2 config set basin_endpoint https://basin.s2.example.com
+```
+
+### compression
+
+Request/response compression algorithm. Options: `gzip`, `zstd`.
+
+```bash
+s2 config set compression zstd
+```
+
+Default: No compression (`none`)
+
+**Benefits:**
+- Reduces network bandwidth
+- Faster for large payloads
+- `zstd` typically offers better compression ratios
+
+### ssl_no_verify
+
+Disable SSL certificate verification. Options: `true`, `false`.
+
+```bash
+s2 config set ssl_no_verify true
+```
+
+Default: `false`
+
+<Warning>
+Only use `ssl_no_verify=true` in development/testing environments. Disabling certificate verification in production is a security risk.
+</Warning>
+
+## Environment variables
+
+All configuration keys can be overridden using environment variables with the `S2_` prefix:
+
+```bash
+export S2_ACCESS_TOKEN="s2_abc123..."
+export S2_ACCOUNT_ENDPOINT="https://account.s2.dev"
+export S2_BASIN_ENDPOINT="https://basin.s2.dev"
+export S2_COMPRESSION="zstd"
+export S2_SSL_NO_VERIFY="false"
+```
+
+Environment variables take precedence over configuration file values.
+
+### Example: Using environment variables for CI/CD
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+export S2_ACCESS_TOKEN="${CI_S2_TOKEN}"
+export S2_COMPRESSION="zstd"
+
+s2 append s2://prod/deployments <<EOF
+{"version": "1.2.3", "timestamp": "$(date -Iseconds)"}
+EOF
+```
+
+## Example configuration file
+
+```toml
+# ~/.config/s2/config.toml
+
+access_token = "s2_abc123xyz..."
+compression = "zstd"
+ssl_no_verify = false
+
+# Custom endpoints (optional)
+# account_endpoint = "https://account.s2.dev"
+# basin_endpoint = "https://basin.s2.dev"
+```
+
+## Authentication
+
+The CLI uses the access token specified in `access_token` for all API requests. Tokens are included in the `Authorization` header:
+
+```
+Authorization: Bearer s2_abc123...
+```
+
+### Token management
+
+Access tokens can have:
+- Expiration dates
+- Scoped permissions (basins, streams, operations)
+- Automatic stream prefixing
+
+See [Access tokens](/api/authentication) for details.
+
+### Obtaining your first token
+
+1. Sign up at [s2.dev](https://s2.dev)
+2. Create an access token in the console
+3. Configure the CLI:
+
+```bash
+s2 config set access_token YOUR_TOKEN
+```
+
+### Creating scoped tokens from the CLI
+
+Once you have a parent token configured, you can issue child tokens with restricted permissions:
+
+```bash
+s2 issue-access-token \
+  --id "ci-deployment-token" \
+  --expires-in "90d" \
+  --basins "prod" \
+  --streams "deployments/" \
+  --ops "append,read"
+```
+
+This creates a token that can only append and read from streams with the `deployments/` prefix in the `prod` basin.
+
+## Configuration priority
+
+Configuration values are resolved in this order (highest to lowest priority):
+
+1. **Environment variables** (`S2_*`)
+2. **Configuration file** (`~/.config/s2/config.toml`)
+3. **Default values**
+
+## Troubleshooting
+
+### Permission denied when writing config
+
+Ensure the config directory exists and is writable:
+
+```bash
+mkdir -p ~/.config/s2
+chmod 700 ~/.config/s2
+```
+
+### Invalid access token error
+
+Verify your token is set correctly:
+
+```bash
+s2 config get access_token
+```
+
+Ensure there are no extra spaces or quotes in the token value.
+
+### Certificate verification failed
+
+If you're using custom endpoints with self-signed certificates (development only):
+
+```bash
+s2 config set ssl_no_verify true
+```
+
+<Warning>
+Never disable SSL verification in production.
+</Warning>

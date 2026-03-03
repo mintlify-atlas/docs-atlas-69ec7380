@@ -1,0 +1,102 @@
+---
+title: 'Get Stream Config'
+description: 'Retrieve the configuration of a stream'
+api: 'GET /streams/{stream}/config'
+---
+
+## Overview
+
+Retrieve the current configuration settings for a stream, including storage class, retention policy, timestamping behavior, and delete-on-empty settings.
+
+## Authentication
+
+This endpoint requires authentication via the `S2-Basin` header containing your basin name.
+
+## Path Parameters
+
+<ParamField path="stream" type="string" required>
+  The name of the stream.
+  
+  Example: `logs/application`
+</ParamField>
+
+## Response
+
+<ResponseField name="storage_class" type="string">
+  Storage class for recent writes:
+  - `standard` - Append tail latency under 400ms
+  - `express` - Append tail latency under 40ms
+</ResponseField>
+
+<ResponseField name="retention_policy" type="object">
+  Retention policy for the stream.
+  
+  <Expandable title="RetentionPolicy">
+    One of:
+    - `{"age": <seconds>}` - Automatic trimming of records older than this age in seconds
+    - `{"infinite": {}}` - Retain records unless explicitly trimmed
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timestamping" type="object">
+  Timestamping behavior configuration.
+  
+  <Expandable title="TimestampingConfig">
+    <ResponseField name="mode" type="string">
+      Timestamping mode:
+      - `client-prefer` - Prefer client timestamp if present, otherwise use arrival time
+      - `client-require` - Require client timestamp, reject if missing
+      - `arrival` - Use arrival time, ignore client timestamp
+    </ResponseField>
+    
+    <ResponseField name="uncapped" type="boolean">
+      Whether client timestamps can exceed arrival time. If false, client timestamps are capped at arrival time.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="delete_on_empty" type="object">
+  Automatic deletion configuration for empty streams.
+  
+  <Expandable title="DeleteOnEmptyConfig">
+    <ResponseField name="min_age_secs" type="number">
+      Minimum age in seconds before an empty stream can be deleted. If 0, automatic deletion is disabled.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET 'https://{basin}.b.aws.s2.dev/v1/streams/logs%2Fapplication/config' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+<Note>
+  Stream names in the URL must be properly URL-encoded. For example, `logs/application` becomes `logs%2Fapplication`.
+</Note>
+
+## Example Response
+
+```json
+{
+  "storage_class": "standard",
+  "retention_policy": {
+    "age": 604800
+  },
+  "timestamping": {
+    "mode": "client-prefer",
+    "uncapped": false
+  },
+  "delete_on_empty": {
+    "min_age_secs": 0
+  }
+}
+```
+
+## Error Responses
+
+- **404 Not Found** - Stream does not exist
+- **400 Bad Request** - Invalid stream name
+- **403 Forbidden** - Insufficient permissions to view the configuration

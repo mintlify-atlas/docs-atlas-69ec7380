@@ -1,0 +1,187 @@
+---
+title: "List Access Tokens"
+description: "List access tokens with optional filtering and pagination"
+---
+
+## Endpoint
+
+```
+GET /v1/access-tokens
+```
+
+List access tokens associated with your account. Returns metadata about the tokens (IDs, scopes, expiration) but not the actual token secrets.
+
+<Warning>
+  This endpoint is not supported in s2-lite. Access token management is only available in S2 Cloud.
+</Warning>
+
+## Query Parameters
+
+<ParamField query="prefix" type="string" optional>
+  Filter to access tokens whose IDs begin with this prefix. Use an empty string to match all tokens.
+</ParamField>
+
+<ParamField query="start_after" type="string" optional>
+  Filter to access tokens whose IDs lexicographically start after this string. Used for pagination.
+</ParamField>
+
+<ParamField query="limit" type="number" optional default="1000">
+  Number of results to return, up to a maximum of 1000.
+</ParamField>
+
+## Response
+
+<ResponseField name="access_tokens" type="array">
+  List of access token information objects (up to 1000 items).
+  
+  <Expandable title="AccessTokenInfo object">
+    <ResponseField name="id" type="string" required>
+      Access token ID. Must be unique to the account and between 1 and 96 bytes in length.
+    </ResponseField>
+    
+    <ResponseField name="expires_at" type="string">
+      Expiration time in RFC 3339 format (e.g., `2027-01-01T00:00:00Z`).
+    </ResponseField>
+    
+    <ResponseField name="auto_prefix_streams" type="boolean">
+      Whether stream names are automatically prefixed based on the stream-level scope.
+    </ResponseField>
+    
+    <ResponseField name="scope" type="object" required>
+      Access token scope defining permissions.
+      
+      <Expandable title="Scope properties">
+        <ResponseField name="basins" type="object">
+          Basin names allowed. Can be `{"exact": "basin-name"}` or `{"prefix": "prefix-"}`.
+        </ResponseField>
+        
+        <ResponseField name="streams" type="object">
+          Stream names allowed. Can be `{"exact": "stream-name"}` or `{"prefix": "prefix-"}`.
+        </ResponseField>
+        
+        <ResponseField name="access_tokens" type="object">
+          Token IDs allowed for token management operations. Can be `{"exact": "token-id"}` or `{"prefix": "prefix-"}`.
+        </ResponseField>
+        
+        <ResponseField name="op_groups" type="object">
+          Access permissions at operation group level.
+          
+          <Expandable title="Operation groups">
+            <ResponseField name="account" type="object">
+              Account-level access permissions with `read` and `write` boolean fields.
+            </ResponseField>
+            
+            <ResponseField name="basin" type="object">
+              Basin-level access permissions with `read` and `write` boolean fields.
+            </ResponseField>
+            
+            <ResponseField name="stream" type="object">
+              Stream-level access permissions with `read` and `write` boolean fields.
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+        
+        <ResponseField name="ops" type="array">
+          List of specific operations allowed for the token. Union of `ops` and `op_groups` is used as the effective set of allowed operations.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean" required>
+  Indicates whether there are more access tokens that match the criteria.
+</ResponseField>
+
+## Example
+
+<CodeGroup>
+
+```bash cURL
+curl -X GET "https://aws.s2.dev/v1/access-tokens?limit=10" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+```
+
+```bash cURL (with filtering)
+curl -X GET "https://aws.s2.dev/v1/access-tokens?prefix=prod-&limit=100" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+```
+
+```rust Rust SDK
+use s2_sdk::{S2, types::{S2Config, ListAccessTokensInput}};
+
+let client = S2::new(S2Config::new(token))?;
+let result = client.list_access_tokens(
+    ListAccessTokensInput::new()
+        .with_prefix("prod-".parse()?)
+        .with_limit(100)
+).await?;
+
+for token_info in result.access_tokens {
+    println!("Token: {} expires at {:?}", token_info.id, token_info.expires_at);
+}
+```
+
+</CodeGroup>
+
+<ResponseExample>
+
+```json 200 OK
+{
+  "access_tokens": [
+    {
+      "id": "prod-api-token",
+      "expires_at": "2027-01-01T00:00:00Z",
+      "auto_prefix_streams": false,
+      "scope": {
+        "basins": {"prefix": "prod-"},
+        "streams": {"prefix": ""},
+        "op_groups": {
+          "stream": {
+            "read": true,
+            "write": true
+          }
+        },
+        "ops": []
+      }
+    },
+    {
+      "id": "prod-readonly-token",
+      "expires_at": "2026-12-31T23:59:59Z",
+      "auto_prefix_streams": false,
+      "scope": {
+        "basins": {"exact": "production"},
+        "streams": {"prefix": "logs/"},
+        "op_groups": {
+          "stream": {
+            "read": true,
+            "write": false
+          }
+        },
+        "ops": []
+      }
+    }
+  ],
+  "has_more": false
+}
+```
+
+</ResponseExample>
+
+## Pagination
+
+To paginate through results:
+
+1. Make an initial request with your desired `limit`
+2. If `has_more` is `true`, make another request with `start_after` set to the last token ID from the previous response
+3. Repeat until `has_more` is `false`
+
+```bash
+# First page
+curl -X GET "https://aws.s2.dev/v1/access-tokens?limit=100" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+
+# Next page (if has_more: true)
+curl -X GET "https://aws.s2.dev/v1/access-tokens?limit=100&start_after=last-token-id" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN"
+```

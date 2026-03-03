@@ -1,0 +1,99 @@
+---
+title: 'List Streams'
+description: 'Retrieve a paginated list of streams in a basin'
+api: 'GET /streams'
+---
+
+## Overview
+
+List all streams in a basin with optional filtering by prefix. Results are paginated with a maximum of 1000 streams per request.
+
+## Authentication
+
+This endpoint requires authentication via the `S2-Basin` header containing your basin name.
+
+## Query Parameters
+
+<ParamField query="prefix" type="string">
+  Filter to streams whose names begin with this prefix.
+  
+  Example: `logs/` would match `logs/app` and `logs/system` but not `metrics/cpu`
+</ParamField>
+
+<ParamField query="start_after" type="string">
+  Filter to streams whose names lexicographically start after this string. Must be greater than or equal to the `prefix` if specified.
+  
+  Used for pagination - pass the last stream name from the previous page to get the next page of results.
+</ParamField>
+
+<ParamField query="limit" type="number" default="1000">
+  Number of results to return. Maximum value is 1000.
+</ParamField>
+
+## Response
+
+<ResponseField name="streams" type="StreamInfo[]">
+  Array of matching streams.
+  
+  <Expandable title="StreamInfo">
+    <ResponseField name="name" type="string">
+      Stream name unique to the basin. Between 1 and 512 bytes in length.
+    </ResponseField>
+    
+    <ResponseField name="created_at" type="string">
+      Creation time in RFC 3339 format.
+      
+      Example: `2024-01-15T10:30:00Z`
+    </ResponseField>
+    
+    <ResponseField name="deleted_at" type="string | null">
+      Deletion time in RFC 3339 format if the stream is being deleted, otherwise null.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean">
+  Indicates that there are more results that match the criteria. Use the last stream name with `start_after` to retrieve the next page.
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET 'https://{basin}.b.aws.s2.dev/v1/streams?prefix=logs/&limit=100' \
+  -H 'S2-Basin: my-basin' \
+  -H 'Authorization: Bearer YOUR_TOKEN'
+```
+
+## Example Response
+
+```json
+{
+  "streams": [
+    {
+      "name": "logs/application",
+      "created_at": "2024-01-15T10:30:00Z",
+      "deleted_at": null
+    },
+    {
+      "name": "logs/system",
+      "created_at": "2024-01-14T08:15:00Z",
+      "deleted_at": null
+    }
+  ],
+  "has_more": false
+}
+```
+
+## Pagination Example
+
+To retrieve all streams with pagination:
+
+```bash
+# First request
+curl -X GET 'https://{basin}.b.aws.s2.dev/v1/streams?limit=1000' \
+  -H 'S2-Basin: my-basin'
+
+# If has_more is true, get next page
+curl -X GET 'https://{basin}.b.aws.s2.dev/v1/streams?start_after=last-stream-name&limit=1000' \
+  -H 'S2-Basin: my-basin'
+```

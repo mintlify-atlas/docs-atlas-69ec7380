@@ -1,0 +1,501 @@
+---
+title: Kubernetes Deployment
+description: Deploy S2 Lite to Kubernetes using Helm
+---
+
+Deploy S2 Lite to Kubernetes using the official Helm chart. The chart supports various deployment scenarios from development to production.
+
+## Prerequisites
+
+- Kubernetes 1.19+
+- Helm 3.0+
+- (Optional) S3-compatible object storage for persistent data
+
+## Quick Start
+
+<Steps>
+  <Step title="Add the Helm repository">
+    ```bash
+    helm repo add s2 https://s2-streamstore.github.io/s2
+    helm repo update
+    ```
+  </Step>
+
+  <Step title="Install with default settings">
+    The default installation runs in-memory mode (great for testing):
+
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm
+    ```
+  </Step>
+
+  <Step title="Verify the installation">
+    ```bash
+    # Check the pod status
+    kubectl get pods -l app.kubernetes.io/name=s2-lite
+
+    # Check the service
+    kubectl get svc -l app.kubernetes.io/name=s2-lite
+
+    # Port forward to access locally
+    kubectl port-forward svc/s2-lite 8080:80
+
+    # Test the health endpoint
+    curl http://localhost:8080/health
+    ```
+  </Step>
+</Steps>
+
+## Installation from OCI Registry
+
+You can also install directly from GitHub Container Registry:
+
+```bash
+helm install my-s2-lite oci://ghcr.io/s2-streamstore/charts/s2-lite-helm
+```
+
+## Storage Options
+
+### In-Memory (Default)
+
+Perfect for development and testing:
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm
+```
+
+<Warning>
+Data is lost when the pod restarts. Not suitable for production.
+</Warning>
+
+### S3-Compatible Object Storage
+
+For production deployments with persistent data:
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm \
+  --set objectStorage.enabled=true \
+  --set objectStorage.bucket=my-s2-bucket \
+  --set objectStorage.path=s2lite
+```
+
+## Configuration Examples
+
+### AWS S3 with IAM Role (IRSA)
+
+Recommended for EKS deployments:
+
+<Steps>
+  <Step title="Create IAM policy and role">
+    Create an IAM policy with S3 access:
+
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::my-s2-bucket",
+            "arn:aws:s3:::my-s2-bucket/*"
+          ]
+        }
+      ]
+    }
+    ```
+
+    Create an IAM role with OIDC trust relationship for your EKS cluster.
+  </Step>
+
+  <Step title="Create values file">
+    ```yaml values.yaml
+    objectStorage:
+      enabled: true
+      bucket: my-s2-bucket
+      path: s2lite
+
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/s2-lite-role
+    ```
+  </Step>
+
+  <Step title="Install with values">
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+### With Static Credentials
+
+For non-AWS S3-compatible storage (MinIO, Tigris, R2, etc.):
+
+<Steps>
+  <Step title="Create a secret">
+    ```bash
+    kubectl create secret generic s2-lite-credentials \
+      --from-literal=AWS_ACCESS_KEY_ID=your-access-key \
+      --from-literal=AWS_SECRET_ACCESS_KEY=your-secret-key
+    ```
+  </Step>
+
+  <Step title="Create values file">
+    ```yaml values.yaml
+    objectStorage:
+      enabled: true
+      bucket: my-bucket
+      endpoint: https://fly.storage.tigris.dev
+
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: s2-lite-credentials
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: s2-lite-credentials
+            key: AWS_SECRET_ACCESS_KEY
+    ```
+  </Step>
+
+  <Step title="Install">
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+### With TLS
+
+#### Self-Signed Certificate
+
+For development/testing:
+
+```yaml values.yaml
+tls:
+  enabled: true
+  selfSigned: true
+
+service:
+  type: LoadBalancer
+```
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+```
+
+<Note>
+Clients will need to use `--insecure` or configure SSL verification to trust the self-signed certificate.
+</Note>
+
+#### Provided Certificate
+
+For production with valid certificates:
+
+<Steps>
+  <Step title="Create TLS secret">
+    ```bash
+    kubectl create secret tls s2-lite-tls \
+      --cert=tls.crt \
+      --key=tls.key
+    ```
+  </Step>
+
+  <Step title="Create values file">
+    ```yaml values.yaml
+    tls:
+      enabled: true
+      cert: /etc/tls/tls.crt
+      key: /etc/tls/tls.key
+
+    volumeMounts:
+      - name: tls-certs
+        mountPath: /etc/tls
+        readOnly: true
+
+    volumes:
+      - name: tls-certs
+        secret:
+          secretName: s2-lite-tls
+    ```
+  </Step>
+
+  <Step title="Install">
+    ```bash
+    helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+### With Ingress
+
+Expose S2 Lite via an Ingress controller:
+
+```yaml values.yaml
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: s2-lite.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: s2-lite-tls
+      hosts:
+        - s2-lite.example.com
+```
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+```
+
+### Behind AWS Network Load Balancer
+
+```yaml values.yaml
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    external-dns.alpha.kubernetes.io/hostname: "s2.example.com"
+
+objectStorage:
+  enabled: true
+  bucket: my-s2-bucket
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/s2-lite-role
+```
+
+## Monitoring with Prometheus
+
+Enable Prometheus monitoring:
+
+```yaml values.yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: prometheus  # Match your Prometheus operator label
+```
+
+```bash
+helm install my-s2-lite s2/s2-lite-helm -f values.yaml
+```
+
+<Note>
+Requires [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator) to be installed in your cluster.
+</Note>
+
+For TLS-enabled deployments, configure TLS scraping:
+
+```yaml values.yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    tlsConfig:
+      insecureSkipVerify: true  # For self-signed certs
+      # Or for CA-signed certs:
+      # ca:
+      #   secret:
+      #     name: s2-lite-tls
+      #     key: tls.crt
+```
+
+## Resource Configuration
+
+Set resource requests and limits:
+
+```yaml values.yaml
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+```
+
+## Pod Disruption Budget
+
+Protect against voluntary disruptions:
+
+```yaml values.yaml
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+```
+
+<Warning>
+S2 Lite runs as a single instance. With `replicaCount: 1`, a PDB will prevent pod eviction. Use carefully.
+</Warning>
+
+## Advanced Configuration
+
+### SlateDB Settings
+
+Configure SlateDB parameters via environment variables:
+
+```yaml values.yaml
+env:
+  # Flush interval (default: 50ms for S3, 5ms for in-memory)
+  - name: SL8_FLUSH_INTERVAL
+    value: "50ms"
+  # Manifest poll interval
+  - name: SL8_MANIFEST_POLL_INTERVAL
+    value: "1s"
+```
+
+See the [SlateDB settings reference](https://docs.rs/slatedb/latest/slatedb/config/struct.Settings.html) for all options.
+
+### Enable Pipelining
+
+For better performance (currently disabled by default for safety):
+
+```yaml values.yaml
+env:
+  - name: S2LITE_PIPELINE
+    value: "true"
+```
+
+### Init File for Resources
+
+Pre-create basins and streams at startup:
+
+<Steps>
+  <Step title="Create ConfigMap">
+    ```bash
+    kubectl create configmap s2-lite-init \
+      --from-file=resources.json=resources.json
+    ```
+  </Step>
+
+  <Step title="Configure values">
+    ```yaml values.yaml
+    env:
+      - name: S2LITE_INIT_FILE
+        value: /config/resources.json
+
+    volumeMounts:
+      - name: init-config
+        mountPath: /config
+        readOnly: true
+
+    volumes:
+      - name: init-config
+        configMap:
+          name: s2-lite-init
+    ```
+  </Step>
+</Steps>
+
+## Configuration Reference
+
+Common Helm values:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------||
+| `replicaCount` | Number of replicas (must be 1) | `1` |
+| `image.repository` | Image repository | `ghcr.io/s2-streamstore/s2` |
+| `image.tag` | Image tag | Chart appVersion |
+| `service.type` | Service type | `ClusterIP` |
+| `service.port` | Service port | `80` |
+| `service.targetPort` | Container port | `8080` |
+| `tls.enabled` | Enable TLS | `false` |
+| `tls.selfSigned` | Use self-signed cert | `false` |
+| `objectStorage.enabled` | Enable object storage | `false` |
+| `objectStorage.bucket` | S3 bucket name | `""` |
+| `metrics.serviceMonitor.enabled` | Enable ServiceMonitor | `false` |
+| `resources` | Resource requests/limits | `{}` |
+
+See the [values.yaml](https://github.com/s2-streamstore/s2/blob/main/charts/s2-lite-helm/values.yaml) for all options.
+
+## Upgrading
+
+```bash
+# Update the repository
+helm repo update
+
+# Upgrade to the latest version
+helm upgrade my-s2-lite s2/s2-lite-helm
+
+# Or with custom values
+helm upgrade my-s2-lite s2/s2-lite-helm -f values.yaml
+```
+
+<Warning>
+S2 Lite uses a `Recreate` deployment strategy. Upgrades will cause brief downtime while the old pod terminates and the new one starts.
+</Warning>
+
+## Uninstalling
+
+```bash
+helm uninstall my-s2-lite
+```
+
+<Note>
+Uninstalling will not delete data in object storage. Your S3 bucket remains intact.
+</Note>
+
+## Troubleshooting
+
+### Pod Not Starting
+
+Check pod events:
+```bash
+kubectl describe pod -l app.kubernetes.io/name=s2-lite
+```
+
+### Check Logs
+
+```bash
+kubectl logs -l app.kubernetes.io/name=s2-lite --follow
+```
+
+### Health Check Failures
+
+Test the health endpoint:
+```bash
+kubectl port-forward svc/s2-lite 8080:80
+curl http://localhost:8080/health
+```
+
+### Object Storage Connection Issues
+
+Verify credentials and permissions:
+```bash
+# Check environment variables
+kubectl exec -it <pod-name> -- env | grep AWS
+
+# Test S3 access (requires aws-cli in debug image)
+kubectl exec -it <pod-name> -- aws s3 ls s3://my-s2-bucket/
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Monitoring" icon="chart-line" href="/lite/monitoring">
+    Set up monitoring and alerts
+  </Card>
+  <Card title="Configuration" icon="gear" href="/lite/configuration">
+    Detailed configuration reference
+  </Card>
+</CardGroup>

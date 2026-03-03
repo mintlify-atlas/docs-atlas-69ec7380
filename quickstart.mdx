@@ -1,80 +1,279 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get started with S2 in minutes by creating your first basin and stream
 ---
 
-## Get started in three steps
+# Quick start
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through setting up S2 Lite locally and creating your first basin and stream. You'll be reading and writing records in just a few minutes.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- The S2 CLI installed ([installation guide](/installation))
+- A terminal or command prompt
 
-### Step 2: Deploy your changes
+## Start S2 Lite
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+S2 Lite is embedded in the CLI and provides a fully functional S2 API that runs in-memory. Start it with:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```bash
+s2 lite --port 8080
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This starts S2 Lite on port 8080 with in-memory storage. No external dependencies required.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For production use, you can configure S2 Lite to use object storage like AWS S3 or Tigris. See the [S2 Lite documentation](https://github.com/s2-streamstore/s2#s2-lite) for details.
 </Note>
+
+## Configure the CLI
+
+In a new terminal, set these environment variables to point the CLI at your local S2 Lite instance:
+
+```bash
+export S2_ACCOUNT_ENDPOINT="http://localhost:8080"
+export S2_BASIN_ENDPOINT="http://localhost:8080"
+export S2_ACCESS_TOKEN="ignored"
+```
+
+<Tip>
+S2 Lite doesn't require authentication for local development, but you still need to set `S2_ACCESS_TOKEN` to any value.
+</Tip>
+
+## Verify the server is ready
+
+Check that S2 Lite is running:
+
+```bash
+curl http://localhost:8080/health
+```
+
+You should see a 200 OK response.
+
+## Create a basin
+
+Create your first basin with automatic stream creation enabled:
+
+```bash
+s2 create-basin quickstart --create-stream-on-append --create-stream-on-read
+```
+
+This creates a basin named `quickstart` that automatically creates streams when you append to or read from them.
+
+<Steps>
+  <Step title="Create a basin">
+    The basin is created with automatic stream creation enabled
+  </Step>
+  <Step title="Append records">
+    Write your first records to a stream
+  </Step>
+  <Step title="Read records">
+    Read the records back from the stream
+  </Step>
+</Steps>
+
+## Write records to a stream
+
+Append some records to a new stream:
+
+```bash
+echo "Hello, S2!" | s2 append s2://quickstart/my-stream
+echo "This is my first record" | s2 append s2://quickstart/my-stream
+echo "Streaming is fun" | s2 append s2://quickstart/my-stream
+```
+
+Each line becomes a separate record in the stream. The stream is created automatically because we enabled `--create-stream-on-append`.
+
+## Read records from a stream
+
+Read all records from the stream:
+
+```bash
+s2 read s2://quickstart/my-stream
+```
+
+You should see all three records printed to stdout.
+
+<CodeGroup>
+```bash Read from beginning
+# Read all historical records
+s2 read s2://quickstart/my-stream
+```
+
+```bash Tail live updates
+# Read and wait for new records (like tail -f)
+s2 read s2://quickstart/my-stream --follow
+```
+
+```bash Read from specific position
+# Read from sequence number 1
+s2 read s2://quickstart/my-stream --start-seq-num 1
+```
+</CodeGroup>
+
+## Try real-time streaming
+
+Open two terminals to see real-time streaming in action.
+
+**Terminal 1** - Start a live reader:
+
+```bash
+s2 read s2://quickstart/live-demo --follow 2>/dev/null
+```
+
+**Terminal 2** - Stream data in:
+
+```bash
+for i in {1..10}; do 
+  echo "Message $i" | s2 append s2://quickstart/live-demo
+  sleep 1
+done
+```
+
+You'll see messages appear in Terminal 1 as they're written in Terminal 2.
+
+<Tip>
+Try the Star Wars streaming demo for something more fun:
+
+```bash
+# Terminal 1: Start reading
+s2 read s2://quickstart/starwars 2>/dev/null
+
+# Terminal 2: Stream Star Wars
+nc starwars.s2.dev 23 | s2 append s2://quickstart/starwars
+```
+</Tip>
+
+## Benchmark performance
+
+Test S2 Lite's performance with the built-in benchmark:
+
+```bash
+s2 bench quickstart --target-mibps 10 --duration 5s --catchup-delay 0s
+```
+
+This writes and reads data at 10 MiB/s for 5 seconds, showing throughput and latency metrics.
+
+## Next steps with the SDK
+
+Now that you have S2 Lite running, try using the SDK to build applications.
+
+### Rust SDK example
+
+Add the SDK to your project:
+
+```bash
+cargo add s2-sdk tokio futures
+```
+
+Write and read records programmatically:
+
+<CodeGroup>
+```rust Write records
+use s2_sdk::{
+    S2,
+    producer::ProducerConfig,
+    types::{AppendRecord, S2Config},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = S2::new(S2Config::new(std::env::var("S2_ACCESS_TOKEN")?))?;
+    let stream = client.basin("quickstart".parse()?)
+                       .stream("my-stream".parse()?);
+    
+    let producer = stream.producer(ProducerConfig::new());
+    
+    let ticket = producer.submit(AppendRecord::new("Hello from Rust!")?).await?;
+    let ack = ticket.await?;
+    
+    println!("Record written with seq_num: {}", ack.seq_num);
+    
+    producer.close().await?;
+    Ok(())
+}
+```
+
+```rust Read records
+use futures::StreamExt;
+use s2_sdk::{
+    S2,
+    types::{ReadInput, S2Config},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = S2::new(S2Config::new(std::env::var("S2_ACCESS_TOKEN")?))?;
+    let stream = client.basin("quickstart".parse()?)
+                       .stream("my-stream".parse()?);
+    
+    let mut batches = stream.read_session(ReadInput::new()).await?;
+    
+    while let Some(batch) = batches.next().await {
+        let batch = batch?;
+        println!("Received batch: {:?}", batch);
+    }
+    
+    Ok(())
+}
+```
+</CodeGroup>
+
+<Note>
+Remember to export the environment variables pointing to your S2 Lite instance before running SDK examples.
+</Note>
+
+## Using S2 cloud
+
+To use the managed S2 service instead of S2 Lite:
+
+<Steps>
+  <Step title="Sign up">
+    Create an account at [s2.dev](https://s2.dev)
+  </Step>
+  <Step title="Generate access token">
+    Generate an access token from the [dashboard](https://s2.dev/dashboard)
+  </Step>
+  <Step title="Configure CLI">
+    Set your access token:
+    ```bash
+    export S2_ACCESS_TOKEN="your-token-here"
+    ```
+    
+    Remove the endpoint overrides (or unset them):
+    ```bash
+    unset S2_ACCOUNT_ENDPOINT
+    unset S2_BASIN_ENDPOINT
+    ```
+  </Step>
+  <Step title="Create resources">
+    Use the same commands to create basins and streams
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<Warning>
+If you see connection errors, make sure S2 Lite is running and the environment variables are set correctly.
+</Warning>
+
+### Common issues
+
+**Connection refused**
+- Check that `s2 lite` is running
+- Verify the port matches your `S2_ACCOUNT_ENDPOINT` and `S2_BASIN_ENDPOINT`
+
+**Stream not found**
+- Make sure you created the basin with `--create-stream-on-append` or `--create-stream-on-read`
+- Or manually create the stream with `s2 create-stream`
+
+**Environment variables not set**
+- Re-export the environment variables in each new terminal session
+- Or add them to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.)
+
+## Learn more
+
+- [Installation guide](/installation) - Install other SDKs and tools
+- [Concepts](https://s2.dev/docs/concepts) - Understand basins, streams, and records
+- [API reference](https://s2.dev/docs/api) - Explore the full REST API
+- [SDK documentation](https://docs.rs/s2-sdk) - Rust SDK reference

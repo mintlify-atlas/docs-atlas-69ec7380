@@ -1,0 +1,269 @@
+---
+title: "Issue Access Token"
+description: "Create a new access token with specified permissions"
+---
+
+## Endpoint
+
+```
+POST /v1/access-tokens
+```
+
+Issue a new access token with a specified ID, scope, and expiration. The response contains the actual token secret, which is only returned once and cannot be retrieved later.
+
+<Warning>
+  This endpoint is not supported in s2-lite. Access token management is only available in S2 Cloud.
+</Warning>
+
+<Tip>
+  Store the returned `access_token` value securely. You won't be able to retrieve it again.
+</Tip>
+
+## Request Body
+
+<ParamField body="id" type="string" required>
+  Access token ID. Must be unique to the account and between 1 and 96 bytes in length.
+</ParamField>
+
+<ParamField body="expires_at" type="string" optional>
+  Expiration time in RFC 3339 format (e.g., `2027-01-01T00:00:00Z`). If not set, the expiration will be set to that of the requestor's token.
+</ParamField>
+
+<ParamField body="auto_prefix_streams" type="boolean" optional default={false}>
+  Namespace streams based on the configured stream-level scope, which must be a prefix. Stream name arguments will be automatically prefixed, and the prefix will be stripped when listing streams.
+</ParamField>
+
+<ParamField body="scope" type="object" required>
+  Access token scope defining permissions.
+  
+  <Expandable title="Scope properties">
+    <ParamField body="scope.basins" type="object" optional>
+      Basin names allowed. Can be:
+      - `{"exact": "basin-name"}` - match only this specific basin
+      - `{"prefix": "prefix-"}` - match all basins starting with prefix
+      - `{"prefix": ""}` - match all basins (empty prefix)
+      - `{"exact": ""}` - match no basins
+    </ParamField>
+    
+    <ParamField body="scope.streams" type="object" optional>
+      Stream names allowed. Same format as `basins`.
+    </ParamField>
+    
+    <ParamField body="scope.access_tokens" type="object" optional>
+      Token IDs allowed for token management operations. Same format as `basins`.
+    </ParamField>
+    
+    <ParamField body="scope.op_groups" type="object" optional>
+      Access permissions at operation group level.
+      
+      <Expandable title="Operation groups">
+        <ParamField body="scope.op_groups.account" type="object" optional>
+          Account-level access permissions.
+          
+          <Expandable title="Properties">
+            <ParamField body="read" type="boolean" default={false}>
+              Read permission for account operations (e.g., list basins, list tokens).
+            </ParamField>
+            
+            <ParamField body="write" type="boolean" default={false}>
+              Write permission for account operations (e.g., create/delete basins, issue/revoke tokens).
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField body="scope.op_groups.basin" type="object" optional>
+          Basin-level access permissions (e.g., get config, reconfigure).
+          
+          <Expandable title="Properties">
+            <ParamField body="read" type="boolean" default={false}>
+              Read permission.
+            </ParamField>
+            
+            <ParamField body="write" type="boolean" default={false}>
+              Write permission.
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField body="scope.op_groups.stream" type="object" optional>
+          Stream-level access permissions (e.g., read, append, trim).
+          
+          <Expandable title="Properties">
+            <ParamField body="read" type="boolean" default={false}>
+              Read permission for stream operations (read records, check tail, get config).
+            </ParamField>
+            
+            <ParamField body="write" type="boolean" default={false}>
+              Write permission for stream operations (append, trim, create, delete, reconfigure).
+            </ParamField>
+          </Expandable>
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField body="scope.ops" type="array" optional>
+      List of specific operations allowed. A union of `ops` and `op_groups` is used as the effective set of allowed operations.
+      
+      Available operations: `list-basins`, `create-basin`, `delete-basin`, `reconfigure-basin`, `get-basin-config`, `issue-access-token`, `revoke-access-token`, `list-access-tokens`, `list-streams`, `create-stream`, `delete-stream`, `get-stream-config`, `reconfigure-stream`, `check-tail`, `append`, `read`, `trim`, `fence`, `account-metrics`, `basin-metrics`, `stream-metrics`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+<ResponseField name="access_token" type="string" required>
+  The created access token. This is the only time the token secret will be returned.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "https://aws.s2.dev/v1/access-tokens" \
+  -H "Authorization: Bearer $S2_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "app-backend-token",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "scope": {
+      "basins": {"prefix": ""},
+      "streams": {"prefix": ""},
+      "op_groups": {
+        "stream": {
+          "read": true,
+          "write": true
+        }
+      }
+    }
+  }'
+```
+
+```rust Rust SDK
+use s2_sdk::{
+    S2,
+    types::{
+        S2Config, IssueAccessTokenInput, AccessTokenScopeInput,
+        OperationGroupPermissions, ReadWritePermissions,
+        BasinMatcher, StreamMatcher
+    }
+};
+
+let client = S2::new(S2Config::new(token))?;
+
+// Issue a token with read/write access to all streams
+let result = client
+    .issue_access_token(
+        IssueAccessTokenInput::new(
+            "app-backend-token".parse()?,
+            AccessTokenScopeInput::from_op_group_perms(
+                OperationGroupPermissions::new()
+                    .with_stream(ReadWritePermissions::read_write())
+            )
+            .with_basins(BasinMatcher::Prefix("".parse()?))
+            .with_streams(StreamMatcher::Prefix("".parse()?))
+        )
+        .with_expires_at("2027-01-01T00:00:00Z".parse()?)
+    )
+    .await?;
+
+// Store the token securely
+println!("New token: {}", result.access_token);
+```
+
+</CodeGroup>
+
+<ResponseExample>
+
+```json 200 OK
+{
+  "access_token": "s2_AcTo01h8mCt9Qn..." 
+}
+```
+
+</ResponseExample>
+
+## Common Use Cases
+
+### Read-only token for specific streams
+
+Create a token that can only read from streams with a specific prefix:
+
+```json
+{
+  "id": "analytics-readonly",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "scope": {
+    "basins": {"exact": "production"},
+    "streams": {"prefix": "logs/"},
+    "op_groups": {
+      "stream": {
+        "read": true,
+        "write": false
+      }
+    }
+  }
+}
+```
+
+### User-scoped token with auto-prefixing
+
+Create a token for a specific user where all stream operations are automatically prefixed:
+
+```json
+{
+  "id": "user-1234-token",
+  "expires_at": "2027-01-01T00:00:00Z",
+  "auto_prefix_streams": true,
+  "scope": {
+    "basins": {"prefix": ""},
+    "streams": {"prefix": "users/1234/"},
+    "op_groups": {
+      "stream": {
+        "read": true,
+        "write": true
+      }
+    }
+  }
+}
+```
+
+With `auto_prefix_streams: true`, when using this token:
+- `append("messages")` → actually appends to `"users/1234/messages"`
+- `list_streams()` → returns `"messages"` instead of `"users/1234/messages"`
+
+### Token with specific operations
+
+Create a token with fine-grained permissions using the `ops` array:
+
+```json
+{
+  "id": "metrics-collector",
+  "scope": {
+    "basins": {"prefix": ""},
+    "ops": ["account-metrics", "basin-metrics", "stream-metrics"]
+  }
+}
+```
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Principle of Least Privilege" icon="shield">
+  Grant only the minimum permissions needed for the token's intended use.
+</Card>
+
+<Card title="Set Expiration" icon="clock">
+  Always set an `expires_at` time appropriate for the token's use case.
+</Card>
+
+<Card title="Scope Narrowly" icon="bullseye">
+  Use specific basin/stream prefixes or exact matches rather than allowing all resources.
+</Card>
+
+<Card title="Rotate Regularly" icon="rotate">
+  Implement token rotation for long-lived tokens.
+</Card>
+
+</CardGroup>

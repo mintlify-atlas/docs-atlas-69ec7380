@@ -1,0 +1,174 @@
+---
+title: CLI overview
+description: Command-line interface for managing S2 streams and basins
+---
+
+The S2 CLI is a command-line tool for interacting with the S2 stream store. It provides comprehensive management of basins, streams, access tokens, and records, along with benchmarking and monitoring capabilities.
+
+## Installation
+
+The S2 CLI is distributed as a standalone binary:
+
+```bash
+# Download and install the latest version
+curl -fsSL https://install.s2.dev | sh
+
+# Verify installation
+s2 --version
+```
+
+## Quick start
+
+Configure your access token:
+
+```bash
+s2 config set access_token YOUR_ACCESS_TOKEN
+```
+
+List available basins:
+
+```bash
+s2 list-basins
+```
+
+Create a basin and stream:
+
+```bash
+s2 create-basin my-basin
+s2 create-stream s2://my-basin/events
+```
+
+## Command structure
+
+The CLI follows a hierarchical command structure:
+
+```bash
+s2 [COMMAND] [SUBCOMMAND] [OPTIONS] [ARGUMENTS]
+```
+
+### Common patterns
+
+**S2 URIs** - Most stream operations use the format `s2://{basin}/{stream}`:
+
+```bash
+s2 append s2://my-basin/events
+s2 read s2://my-basin/events
+s2 delete-stream s2://my-basin/events
+```
+
+**Listing with filters** - Support prefix filtering and pagination:
+
+```bash
+s2 list-basins --prefix "prod" --limit 100
+s2 list-streams my-basin --prefix "events/" --start-after "events/2024"
+```
+
+**Output formats** - Record operations support multiple formats:
+
+```bash
+s2 read s2://basin/stream --format text
+s2 read s2://basin/stream --format json
+s2 read s2://basin/stream --format json-base64
+```
+
+## Command categories
+
+### Basin management
+
+- `list-basins` - List all basins
+- `create-basin` - Create a new basin
+- `delete-basin` - Delete a basin
+- `get-basin-config` - View basin configuration
+- `reconfigure-basin` - Update basin settings
+
+### Stream management
+
+- `list-streams` - List streams in a basin
+- `create-stream` - Create a new stream
+- `delete-stream` - Delete a stream
+- `get-stream-config` - View stream configuration
+- `reconfigure-stream` - Update stream settings
+- `check-tail` - Check the tail position of a stream
+
+### Record operations
+
+- `append` - Append records to a stream
+- `read` - Read records from a stream
+- `tail` - Show the last N records (like Unix tail)
+- `trim` - Set a trim point to delete old records
+- `fence` - Set a fencing token for write coordination
+
+### Access control
+
+- `list-access-tokens` - List access tokens
+- `issue-access-token` - Create a new access token
+- `revoke-access-token` - Revoke an access token
+
+### Monitoring
+
+- `get-account-metrics` - Retrieve account-level metrics
+- `get-basin-metrics` - Retrieve basin-level metrics
+- `get-stream-metrics` - Retrieve stream-level metrics
+
+### Utilities
+
+- `ls` - List basins or streams (convenience command)
+- `apply` - Apply declarative spec files
+- `bench` - Run performance benchmarks
+- `lite` - Run local S2 Lite server
+
+## Interactive mode
+
+Launch the interactive TUI (Terminal User Interface):
+
+```bash
+s2 -i
+# or
+s2 --interactive
+```
+
+The TUI provides a visual interface for browsing basins and streams.
+
+## Global options
+
+```bash
+s2 --help              # Show help for any command
+s2 --version           # Display CLI version
+```
+
+## Environment variables
+
+All configuration values can be set via environment variables with the `S2_` prefix:
+
+```bash
+export S2_ACCESS_TOKEN="your-token"
+export S2_ACCOUNT_ENDPOINT="https://account.s2.dev"
+export S2_BASIN_ENDPOINT="https://basin.s2.dev"
+export S2_COMPRESSION="zstd"
+export S2_SSL_NO_VERIFY="false"
+```
+
+Environment variables override configuration file values.
+
+## Exit codes
+
+- `0` - Success
+- `1` - General error
+- `2` - Invalid arguments or usage
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/cli/configuration">
+    Configure authentication and endpoints
+  </Card>
+  <Card title="Basin management" icon="database" href="/cli/basins">
+    Create and manage basins
+  </Card>
+  <Card title="Stream management" icon="stream" href="/cli/streams">
+    Create and manage streams
+  </Card>
+  <Card title="Record operations" icon="file" href="/cli/records">
+    Append and read records
+  </Card>
+</CardGroup>
